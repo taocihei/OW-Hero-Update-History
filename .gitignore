@@ -1,0 +1,41 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+/src-tauri/2
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+__pycache__/
+*.py[cod]
+
+# Raw collectors and large local archives are reproducible and are not source files.
+data/
+.tmp-vods/
+artifacts/
+owtv_chunks/
+temp-owcs-stats-2/
+temp-owcs-stats-git/
+
+# Local QA and reverse-engineering scratch files.
+/*.png
+/*.log
+/*.err
+/.tmp*
+/tmp_*
+/owtv*.html
+/owtv_match_chunk.js
+/artifacts_test.py
+/guxue-*.png
+/esports-*.png
+/running-*.png
+/verification-*.png
+/v0*.png
+/test-*.png
+/tests/*.png
+
+# Editor and OS files.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OW英雄更新历史",
+  "version": "0.10.34",
+  "identifier": "cn.balanceatlas.desktop",
+  "build": {
+    "beforeDevCommand": "npm.cmd run dev -- --host 127.0.0.1 --port 1422",
+    "devUrl": "http://127.0.0.1:1422",
+    "beforeBuildCommand": "npm.cmd run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OW英雄更新历史",
+        "width": 1500,
+        "height": 900,
+        "minWidth": 1050,
+        "minHeight": 680,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "category": "Utility",
+    "shortDescription": "守望先锋英雄更新历史与职业比赛数据库",
+    "longDescription": "记录英雄从登场至今的平衡调整，并查看守望先锋职业比赛赛果与英雄数据。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
