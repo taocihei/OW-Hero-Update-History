@@ -984,23 +984,27 @@ async fn fetch_hero_roster() -> Result<Value, String> {
         .build()
         .map_err(|error| format!("Failed to initialize network client: {error}"))?;
 
-    let response = client
-        .get("https://overfast-api.tekrop.fr/heroes?locale=en-us")
-        .send()
-        .await
-        .map_err(|error| format!("Hero roster request failed: {error}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Hero roster request failed (HTTP {})",
-            response.status().as_u16()
-        ));
+    async fn fetch_locale(client: &reqwest::Client, locale: &str) -> Result<Value, String> {
+        let response = client
+            .get(format!("https://overfast-api.tekrop.fr/heroes?locale={locale}"))
+            .send()
+            .await
+            .map_err(|error| format!("Hero roster request failed for {locale}: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "Hero roster request failed for {locale} (HTTP {})",
+                response.status().as_u16()
+            ));
+        }
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Hero roster response was invalid for {locale}: {error}"))
     }
 
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("Hero roster response was invalid: {error}"))
+    let english = fetch_locale(&client, "en-us").await?;
+    let chinese = fetch_locale(&client, "zh-tw").await.unwrap_or_else(|_| json!([]));
+    Ok(json!({ "english": english, "chinese": chinese }))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

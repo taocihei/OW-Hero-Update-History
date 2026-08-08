@@ -1,6 +1,6 @@
 [package]
 name = "balance-atlas"
-version = "0.10.36"
+version = "0.10.37"
 description = "Overwatch hero update history and professional esports schedule"
 authors = ["OW Hero Update History"]
 edition = "2021"

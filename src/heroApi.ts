@@ -23,13 +23,26 @@ type RawHero = {
   gamemodes?: unknown;
 };
 
+type RawRosterPayload = {
+  english?: unknown;
+  chinese?: unknown;
+};
+
 const CACHE_KEY = "balance-atlas:hero-roster:v1";
 const LOCAL_NAMES = new Map(bundledHeroRoster.map((hero) => [hero.key, hero.name]));
 const BUNDLED_PORTRAITS = new Map(bundledHeroRoster.map((hero) => [hero.key, hero.portrait]));
 
-function normalizeRoster(payload: unknown): HeroCatalogItem[] {
-  if (!Array.isArray(payload)) throw new Error("英雄名单格式无效");
-  return payload
+export function normalizeHeroRosterPayload(payload: unknown): HeroCatalogItem[] {
+  const localized = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as RawRosterPayload
+    : null;
+  const english = Array.isArray(localized?.english) ? localized.english : payload;
+  const chinese = Array.isArray(localized?.chinese) ? localized.chinese : [];
+  if (!Array.isArray(english)) throw new Error("英雄名单格式无效");
+  const chineseNames = new Map(chinese
+    .filter((raw): raw is RawHero => Boolean(raw) && typeof raw === "object")
+    .map((raw) => [String(raw.key ?? ""), String(raw.name ?? "")]));
+  return english
     .filter((raw): raw is RawHero => Boolean(raw) && typeof raw === "object")
     .map((raw) => {
       const key = String(raw.key ?? "");
@@ -37,7 +50,7 @@ function normalizeRoster(payload: unknown): HeroCatalogItem[] {
       const gamemodes = Array.isArray(raw.gamemodes) ? raw.gamemodes.map(String) : [];
       return {
         key,
-        name: LOCAL_NAMES.get(key) ?? String(raw.name ?? key),
+        name: LOCAL_NAMES.get(key) ?? chineseNames.get(key) ?? String(raw.name ?? key),
         englishName: String(raw.name ?? key),
         portrait: BUNDLED_PORTRAITS.get(key) ?? String(raw.portrait ?? ""),
         role: role === "tank" || role === "support" ? role : "damage",
@@ -73,12 +86,18 @@ export async function syncHeroRoster(): Promise<HeroRosterState> {
     const { invoke } = await import("@tauri-apps/api/core");
     payload = await invoke("fetch_hero_roster");
   } else {
-    const response = await fetch("https://overfast-api.tekrop.fr/heroes?locale=en-us");
-    if (!response.ok) throw new Error(`英雄名单同步失败（HTTP ${response.status}）`);
-    payload = await response.json();
+    const [englishResponse, chineseResponse] = await Promise.all([
+      fetch("https://overfast-api.tekrop.fr/heroes?locale=en-us"),
+      fetch("https://overfast-api.tekrop.fr/heroes?locale=zh-tw"),
+    ]);
+    if (!englishResponse.ok) throw new Error(`英雄名单同步失败（HTTP ${englishResponse.status}）`);
+    payload = {
+      english: await englishResponse.json(),
+      chinese: chineseResponse.ok ? await chineseResponse.json() : [],
+    };
   }
 
-  const items = normalizeRoster(payload);
+  const items = normalizeHeroRosterPayload(payload);
   if (items.length < 30) throw new Error("在线英雄名单不完整，已保留本地快照");
   const state: HeroRosterState = { items, syncedAt: new Date().toISOString(), source: "online" };
   localStorage.setItem(CACHE_KEY, JSON.stringify(state));
