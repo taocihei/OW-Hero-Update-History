@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OW英雄更新历史",
-  "version": "0.10.35",
+  "version": "0.10.36",
   "identifier": "cn.balanceatlas.desktop",
   "build": {
     "beforeDevCommand": "npm.cmd run dev -- --host 127.0.0.1 --port 1422",

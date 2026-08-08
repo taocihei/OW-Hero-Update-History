@@ -7,6 +7,7 @@ import type { EsportsAnalyticsPayload, HeroWinRate, PlayerHeroUsage, TeamHeroUsa
 import type { EsportsMatch } from "./matchTypes";
 import PlayerFiveEProfile from "./PlayerFiveEProfile";
 import { localizeHeroName, localizeMapName, localizeTournamentName, type UiLocale } from "./esportsI18n";
+import { compareNaturalText, compareUsageDesc } from "./sortAlgorithms";
 
 export type AnalyticsMode = "teams" | "players" | "heroes";
 
@@ -119,6 +120,22 @@ interface MatchLinkCandidate {
   links: TeamHeroMatchLink[];
 }
 
+type UsageSortable = {
+  usage_count?: string | number;
+  team_name?: string;
+  player_name?: string;
+  hero_name?: string;
+};
+
+function compareUsageRows<T extends UsageSortable>(left: T, right: T) {
+  return compareUsageDesc(
+    left,
+    right,
+    (item) => n(item.usage_count),
+    (item) => [item.team_name, item.player_name, item.hero_name].filter(Boolean).join("|"),
+  );
+}
+
 function sameTeamPair(candidate: MatchLinkCandidate, team: string, opponent: string) {
   return (sameTeam(candidate.team1, team) && sameTeam(candidate.team2, opponent))
     || (sameTeam(candidate.team2, team) && sameTeam(candidate.team1, opponent));
@@ -184,7 +201,7 @@ function mergeRankRows(rows: TeamHeroUsage[], field: "team_name") {
       current.pick_count = current.usage_count;
     } else merged.set(key, { ...row });
   }
-  return Array.from(merged.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+  return Array.from(merged.values()).sort(compareUsageRows);
 }
 
 function mergePlayerRankRows(rows: PlayerHeroUsage[]) {
@@ -195,7 +212,7 @@ function mergePlayerRankRows(rows: PlayerHeroUsage[]) {
     if (current) current.usage_count = String(n(current.usage_count) + n(row.usage_count));
     else merged.set(key, { ...row });
   }
-  return Array.from(merged.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+  return Array.from(merged.values()).sort(compareUsageRows);
 }
 
 function tournamentInScope(name: string, scope: string) {
@@ -253,7 +270,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
       const current = unique.get(key);
       if (!current || n(row.usage_count) > n(current.usage_count)) unique.set(key, row);
     }
-    return Array.from(unique.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return Array.from(unique.values()).sort(compareUsageRows);
   }, [scopedOverallUsage]);
   const tournaments = useMemo(() => {
     const ordered: string[] = [...owtvTeamCatalog.tournaments.map((item) => item.name).filter((name): name is string => Boolean(name)), ...scopedTournamentUsage.map((row) => row.tournament_sheet)];
@@ -296,9 +313,9 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
   const playerWin = useMemo(() => new Map(data.playerHeroWinRates.map((row) => [`${row.player_name}|${row.hero_name}`, row])), [data]);
 
   const teamHeroRows = useMemo(() => {
-    if (tournament === "all") return scopedTeamUsage.filter((row) => row.team_name === team).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    if (tournament === "all") return scopedTeamUsage.filter((row) => row.team_name === team).sort(compareUsageRows);
     return mergeRankRows(scopedTournamentTeamUsage.filter((row) => row.team_name === team && tournamentInScope(row.tournament_sheet, tournament)), "team_name")
-      .sort((a, b) => n(b.usage_count) - n(a.usage_count));
+      .sort(compareUsageRows);
   }, [scopedTeamUsage, scopedTournamentTeamUsage, team, tournament]);
   const teamPlayerRows = useMemo(() => {
     const grouped = new Map<string, PlayerHeroUsage[]>();
@@ -306,7 +323,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
       ? scopedPlayerUsage.filter((item) => item.team_name === team)
       : scopedTournamentPlayerUsage.filter((item) => item.team_name === team && tournamentInScope(item.tournament_sheet, tournament));
     for (const row of sourceRows) grouped.set(row.player_name, [...(grouped.get(row.player_name) ?? []), row]);
-    return Array.from(grouped, ([name, rows]) => ({ name, rows: rows.sort((a, b) => n(b.usage_count) - n(a.usage_count)), total: rows.reduce((sum, row) => sum + n(row.usage_count), 0) })).sort((a, b) => b.total - a.total);
+    return Array.from(grouped, ([name, rows]) => ({ name, rows: rows.sort(compareUsageRows), total: rows.reduce((sum, row) => sum + n(row.usage_count), 0) })).sort((a, b) => b.total - a.total || compareNaturalText(a.name, b.name));
   }, [scopedPlayerUsage, scopedTournamentPlayerUsage, team, tournament]);
   const playerRows = useMemo(() => {
     const grouped = new Map<string, PlayerHeroUsage>();
@@ -322,7 +339,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
       current.play_time_seconds = String(n(current.play_time_seconds) + n(row.play_time_seconds));
       current.damage_dealt = String(n(current.damage_dealt) + n(row.damage_dealt));
     }
-    return Array.from(grouped.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return Array.from(grouped.values()).sort(compareUsageRows);
   }, [scopedPlayerUsage, player]);
   const selectedPlayerTeam = useMemo(() => {
     const scheduledTeams = new Set(matches.flatMap((match) => [match.team1, match.team2]).map((value) => normalize(value)));
@@ -334,23 +351,23 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
   }, [data.playerHeroUsage, matches, owtvPlayerProfile, player, playerRows]);
   const heroTournamentMatches = useMemo(() => data.matchHeroUsage.filter((row) => row.hero_name === hero && tournamentInScope(row.tournament_sheet, tournament)), [data.matchHeroUsage, hero, tournament]);
   const heroTeamRows = useMemo(() => {
-    if (tournament === "all") return scopedTeamUsage.filter((row) => row.hero_name === hero).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    if (tournament === "all") return scopedTeamUsage.filter((row) => row.hero_name === hero).sort(compareUsageRows);
     const exact = scopedTournamentTeamUsage.filter((row) => tournamentInScope(row.tournament_sheet, tournament) && row.hero_name === hero);
     if (exact.length) return mergeRankRows(exact, "team_name");
     const grouped = new Map<string, number>();
     for (const row of heroTournamentMatches) {
       for (const teamName of [row.team_top, row.team_bottom].filter(Boolean)) grouped.set(teamName, (grouped.get(teamName) ?? 0) + n(row.usage_count));
     }
-    return Array.from(grouped, ([team_name, usage]) => ({ team_name, hero_name: hero, role: "", usage_count: String(usage), pick_count: String(usage), pick_rate: "0" })).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return Array.from(grouped, ([team_name, usage]) => ({ team_name, hero_name: hero, role: "", usage_count: String(usage), pick_count: String(usage), pick_rate: "0" })).sort(compareUsageRows);
   }, [scopedTeamUsage, scopedTournamentTeamUsage, hero, heroTournamentMatches, tournament]);
   const heroPlayerRows = useMemo(() => {
-    if (tournament === "all") return scopedPlayerUsage.filter((row) => row.hero_name === hero).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    if (tournament === "all") return scopedPlayerUsage.filter((row) => row.hero_name === hero).sort(compareUsageRows);
     const exact = scopedTournamentPlayerUsage.filter((row) => tournamentInScope(row.tournament_sheet, tournament) && row.hero_name === hero);
     if (exact.length) return mergePlayerRankRows(exact);
     const eligibleTeams = new Set(heroTeamRows.map((row) => row.team_name));
-    return scopedPlayerUsage.filter((row) => row.hero_name === hero && eligibleTeams.has(row.team_name)).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return scopedPlayerUsage.filter((row) => row.hero_name === hero && eligibleTeams.has(row.team_name)).sort(compareUsageRows);
   }, [scopedPlayerUsage, scopedTournamentPlayerUsage, hero, heroTeamRows, tournament]);
-  const heroTournamentRows = useMemo(() => scopedTournamentUsage.filter((row) => row.hero_name === hero && tournamentInScope(row.tournament_sheet, tournament)).sort((a, b) => n(b.usage_count) - n(a.usage_count)), [scopedTournamentUsage, hero, tournament]);
+  const heroTournamentRows = useMemo(() => scopedTournamentUsage.filter((row) => row.hero_name === hero && tournamentInScope(row.tournament_sheet, tournament)).sort(compareUsageRows), [scopedTournamentUsage, hero, tournament]);
   const heroMapRows = useMemo(() => {
     const grouped = new Map<string, (typeof scopedMapUsage)[number]>();
     for (const row of scopedMapUsage.filter((item) => item.hero_name === hero)) {
@@ -359,7 +376,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
       if (current) current.usage_count = String(n(current.usage_count) + n(row.usage_count));
       else grouped.set(key, { ...row });
     }
-    return Array.from(grouped.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return Array.from(grouped.values()).sort(compareUsageRows);
   }, [scopedMapUsage, hero]);
   const heroMatchRows = useMemo(() => {
     const grouped = new Map<string, (typeof heroTournamentMatches)[number]>();
@@ -370,7 +387,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
       if (current) current.usage_count = String(n(current.usage_count) + n(row.usage_count));
       else grouped.set(key, { ...row, team_top: teams[0] ?? "", team_bottom: teams[1] ?? "" });
     }
-    return Array.from(grouped.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+    return Array.from(grouped.values()).sort(compareUsageRows);
   }, [heroTournamentMatches]);
   const teamMatches = useMemo(() => {
     const entries = new Map<string, TeamMatchEntry>();

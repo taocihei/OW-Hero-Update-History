@@ -5,6 +5,7 @@ import type { EsportsMatch } from "./matchTypes";
 import { fetchOwtvPlayerPerformance, type OwtvPlayerPerformance } from "./playerPerformanceApi";
 import { localizeHeroName, type UiLocale } from "./esportsI18n";
 import { playerEventSnapshots, type PlayerEventMatch } from "./playerEventSnapshot";
+import { compareDateAsc, compareDateDesc, compareEventHistory, compareUsageDesc } from "./sortAlgorithms";
 
 type Tab = "overview" | "data" | "schedule";
 type HistorySort = "placement" | "date";
@@ -62,7 +63,7 @@ function matchResult(match: Pick<EsportsMatch, "team1" | "team2" | "score1" | "s
 }
 
 function tournamentPlacement(teamRows: EsportsMatch[], allRows: EsportsMatch[], team: string, locale: UiLocale) {
-  const completed = teamRows.filter((match) => match.score1 != null && match.score2 != null).sort((a, b) => a.datetime.localeCompare(b.datetime));
+  const completed = teamRows.filter((match) => match.score1 != null && match.score2 != null).sort(compareDateAsc);
   const final = completed.filter((match) => match.bracketSide === "grand_final").pop();
   if (final) {
     const rank = matchResult(final, team) > 0 ? 1 : 2;
@@ -108,7 +109,8 @@ export default function PlayerFiveEProfile(props: Props) {
     for (const row of allPlayerRows.filter((item) => item.team_name === team && item.player_name !== player)) {
       totals.set(row.player_name, (totals.get(row.player_name) ?? 0) + n(row.usage_count));
     }
-    const rows = Array.from(totals, ([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+    const rows = Array.from(totals, ([name, total]) => ({ name, total }))
+      .sort((a, b) => compareUsageDesc(a, b, (item) => item.total, (item) => item.name));
     const eventRoster = eventSnapshots[0]?.roster.filter((name) => normalize(name) !== normalize(player)).map((name) => ({ name, total: totals.get(name) ?? 0 })) ?? [];
     return (eventRoster.length ? eventRoster : rows).slice(0, 4);
   }, [allPlayerRows, eventSnapshots, player, team]);
@@ -116,7 +118,7 @@ export default function PlayerFiveEProfile(props: Props) {
   const teamMatches = useMemo(() => {
     const key = normalize(team);
     return matches.filter((match) => normalize(match.team1) === key || normalize(match.team2) === key)
-      .sort((a, b) => b.datetime.localeCompare(a.datetime));
+      .sort(compareDateDesc);
   }, [matches, team]);
 
   const eventRows = useMemo(() => {
@@ -140,9 +142,7 @@ export default function PlayerFiveEProfile(props: Props) {
       const teamEventMatches = teamMatches.filter((match) => match.event === name);
       return { name, ...value, placement: tournamentPlacement(teamEventMatches, eventMatches, team, locale) };
     });
-    return rows.sort((a, b) => historySort === "date"
-      ? b.latest.localeCompare(a.latest) || (a.placement.rank ?? 999) - (b.placement.rank ?? 999)
-      : (a.placement.rank ?? 999) - (b.placement.rank ?? 999) || b.latest.localeCompare(a.latest));
+    return rows.sort((a, b) => compareEventHistory(a, b, historySort));
   }, [historySort, locale, matches, performance, team, teamMatches]);
 
   const eventOptions = useMemo(() => {
@@ -162,7 +162,7 @@ export default function PlayerFiveEProfile(props: Props) {
     const merged = new Map<string, EsportsMatch | OwtvPlayerPerformance["matches"][number]>();
     teamMatches.filter(matchesScope).forEach((match) => merged.set(match.id, match));
     (performance?.matches ?? []).filter(matchesScope).forEach((match) => merged.set(match.id, match));
-    return Array.from(merged.values()).sort((a, b) => b.datetime.localeCompare(a.datetime));
+    return Array.from(merged.values()).sort(compareDateDesc);
   }, [eventScope, performance, selectedEventSnapshot, teamMatches]);
 
   const eventTotals = useMemo(() => {
@@ -191,7 +191,7 @@ export default function PlayerFiveEProfile(props: Props) {
       grouped.set(row.hero_name, (grouped.get(row.hero_name) ?? 0) + n(row.usage_count));
     }
     return Array.from(grouped, ([hero, mapAppearances]) => ({ hero, mapAppearances }))
-      .sort((a, b) => b.mapAppearances - a.mapAppearances);
+      .sort((a, b) => compareUsageDesc(a, b, (item) => item.mapAppearances, (item) => item.hero));
   }, [eventPlayerRows, eventScope, player, selectedEventSnapshot]);
 
   const selectedEventRow = useMemo(() => eventRows.find((row) => normalize(row.name) === normalize(eventScope)) ?? null, [eventRows, eventScope]);
@@ -265,7 +265,7 @@ export default function PlayerFiveEProfile(props: Props) {
     performance?.matches.forEach((match) => {
       merged.set(match.id, match);
     });
-    return Array.from(merged.values()).sort((a, b) => b.datetime.localeCompare(a.datetime));
+    return Array.from(merged.values()).sort(compareDateDesc);
   }, [performance, teamMatches]);
   const scopedMatchRows = eventScope === "all" ? allMatchRows : selectedEventSnapshot?.matches ?? genericEventMatches;
   const recentRows = scopedMatchRows.slice(0, 6);
@@ -334,8 +334,8 @@ export default function PlayerFiveEProfile(props: Props) {
       </section>
 
       {eventScope === "all" && <section className="five-history">
-        <div className="five-section-head"><h4>赛事经历</h4><div className="five-history-sort"><span>{eventRows.length} 项赛事</span><button className={historySort === "placement" ? "active" : ""} onClick={() => setHistorySort("placement")}>按名次</button><button className={historySort === "date" ? "active" : ""} onClick={() => setHistorySort("date")}>按时间</button></div></div>
-        <div>{eventRows.map((event) => <article key={event.name}>
+        <div className="five-section-head"><h4>赛事经历</h4><div className="five-history-sort"><span>{eventRows.length} 项赛事</span><button aria-pressed={historySort === "placement"} className={historySort === "placement" ? "active" : ""} onClick={() => setHistorySort("placement")}>按名次</button><button aria-pressed={historySort === "date"} className={historySort === "date" ? "active" : ""} onClick={() => setHistorySort("date")}>按时间</button></div></div>
+        <div>{eventRows.map((event) => <article key={event.name} data-rank={event.placement.rank ?? "unranked"} data-latest={event.latest}>
           <b><Trophy size={15} />{event.placement.label}</b><span className="five-history-name"><strong>{event.name}</strong><small>{event.latest ? date.format(new Date(event.latest)) : "—"}</small></span><span>{event.resultMatches ? `${event.matches} 场 · ${event.wins} 胜` : `${event.matches} 场统计`}</span>
         </article>)}</div>
       </section>}

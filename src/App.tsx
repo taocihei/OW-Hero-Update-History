@@ -23,6 +23,7 @@ import HeroRosterPicker from "./HeroRosterPicker";
 import { loadHeroRoster, syncHeroRoster } from "./heroApi";
 import type { HeroCatalogItem } from "./heroApi";
 import { openExternalUrl } from "./externalLinks";
+import { compareDateAsc, compareDateDesc } from "./sortAlgorithms";
 
 type UiLanguage = "zh" | "en";
 
@@ -239,13 +240,13 @@ function App() {
   const perkChanges = useMemo(
     () => platformChanges
       .filter((change) => changeTrack(change) === "perk")
-      .sort((a, b) => b.date.localeCompare(a.date)),
+      .sort((a, b) => compareDateDesc({ datetime: a.date, id: a.patchLabel }, { datetime: b.date, id: b.patchLabel })),
     [platformChanges],
   );
   const stadiumChanges = useMemo(
     () => platformChanges
       .filter((change) => changeTrack(change) === "stadium")
-      .sort((a, b) => b.date.localeCompare(a.date)),
+      .sort((a, b) => compareDateDesc({ datetime: a.date, id: a.patchLabel }, { datetime: b.date, id: b.patchLabel })),
     [platformChanges],
   );
 
@@ -281,7 +282,9 @@ function App() {
           .toLowerCase()
           .includes(normalized);
       })
-      .sort((a, b) => ascending ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+      .sort((a, b) => ascending
+        ? compareDateAsc({ datetime: a.date, id: a.patchLabel }, { datetime: b.date, id: b.patchLabel })
+        : compareDateDesc({ datetime: a.date, id: a.patchLabel }, { datetime: b.date, id: b.patchLabel }));
   }, [activeKinds, activeTracks, ascending, platformChanges, query]);
 
   function toggleKind(kind: ChangeKind) {

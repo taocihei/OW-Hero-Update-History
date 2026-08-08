@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
@@ -11,6 +12,17 @@ BASE_URL = "http://127.0.0.1:4181"
 
 def step(name: str) -> None:
     print(f"PASS  {name}")
+
+
+def iso_timestamp(value: str) -> float:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def match_card_timestamps(page: Page) -> list[float]:
+    values = page.locator(".owtv-match-card").evaluate_all(
+        "cards => cards.map(card => card.dataset.datetime).filter(Boolean)"
+    )
+    return [iso_timestamp(value) for value in values]
 
 
 def load(page: Page) -> None:
@@ -94,6 +106,16 @@ def test_schedule(page: Page) -> None:
     page.locator(".owtv-status-tabs button").filter(has_text="比赛结果").click()
     assert page.locator(".owtv-match-card").count() > 0
     assert page.locator(".owtv-match-card .completed").count() > 0
+    completed_dates = match_card_timestamps(page)
+    assert completed_dates == sorted(completed_dates, reverse=True)
+    assert page.locator(".owtv-status-tabs button").filter(has_text="比赛结果").get_attribute("aria-pressed") == "true"
+
+    page.locator(".owtv-status-tabs button").filter(has_text="即将开始").click()
+    upcoming_dates = match_card_timestamps(page)
+    assert upcoming_dates and upcoming_dates == sorted(upcoming_dates)
+    assert page.locator(".owtv-status-tabs button").filter(has_text="即将开始").get_attribute("aria-pressed") == "true"
+
+    page.locator(".owtv-status-tabs button").filter(has_text="比赛结果").click()
     page.locator(".owtv-region-tabs button").filter(has_text="中国").click()
     region_result_count = int(page.locator(".owtv-result-count").inner_text().splitlines()[0])
     assert region_result_count > 0
@@ -155,6 +177,18 @@ def test_analytics(page: Page) -> None:
     page.locator(".match-subnav button").filter(has_text="选手").click()
     choose_sidebar_item(page, "Guxue", "Guxue")
     assert page.locator(".five-player-id h3").inner_text().lower() == "guxue"
+    page.locator(".five-event-select select").select_option("all")
+    history_rows = page.locator(".five-history article")
+    assert history_rows.count() > 1
+    page.locator(".five-history-sort button").filter(has_text="按时间").click()
+    latest = [iso_timestamp(value) for value in history_rows.evaluate_all("rows => rows.map(row => row.dataset.latest).filter(Boolean)")]
+    assert latest == sorted(latest, reverse=True)
+    assert page.locator(".five-history-sort button").filter(has_text="按时间").get_attribute("aria-pressed") == "true"
+    page.locator(".five-history-sort button").filter(has_text="按名次").click()
+    ranks = [int(value) if value != "unranked" else 10**9 for value in history_rows.evaluate_all("rows => rows.map(row => row.dataset.rank)")]
+    assert ranks == sorted(ranks)
+    assert page.locator(".five-history-sort button").filter(has_text="按名次").get_attribute("aria-pressed") == "true"
+    step("比赛时间、赛事名次与同分规则排序")
     hero_buttons = page.locator(".five-event-heroes button") if page.locator(".five-event-heroes button").count() else page.locator(".five-hero-pool button")
     assert hero_buttons.count() > 0
     hero_buttons.first.click()

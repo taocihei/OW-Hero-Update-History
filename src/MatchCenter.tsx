@@ -23,6 +23,7 @@ import { loadEsportsAnalytics, syncEsportsAnalytics } from "./esportsAnalyticsAp
 import EsportsAnalytics, { type AnalyticsMode } from "./EsportsAnalytics";
 import CompetitionDetail from "./CompetitionDetail";
 import OwtvMatchDetail from "./OwtvMatchDetail";
+import { compareCountDesc, compareDateAsc, compareMatchSchedule, compareNaturalText } from "./sortAlgorithms";
 import { fetchPlayerIntel } from "./playerApi";
 import type { EsportsMatch, OwtvMatchDetailPayload, PlayerIntel } from "./matchTypes";
 import type { UiLocale } from "./esportsI18n";
@@ -203,15 +204,16 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
     return () => { active = false; };
   }, []);
 
-  const regions = useMemo(() => Array.from(new Set(matches.map((match) => match.region))).sort(), [matches]);
+  const regions = useMemo(() => Array.from(new Set(matches.map((match) => match.region))).sort(compareNaturalText), [matches]);
   const years = useMemo(() => Array.from(new Set(matches.map((match) => match.datetime.slice(0, 4)).filter((value) => /^\d{4}$/.test(value)))).sort((a, b) => b.localeCompare(a)), [matches]);
-  const eventCounts = useMemo(() => Array.from(matches.reduce((map, match) => map.set(match.event, (map.get(match.event) || 0) + 1), new Map<string, number>())).sort((a, b) => b[1] - a[1]), [matches]);
+  const eventCounts = useMemo(() => Array.from(matches.reduce((map, match) => map.set(match.event, (map.get(match.event) || 0) + 1), new Map<string, number>()))
+    .sort((a, b) => compareCountDesc({ label: a[0], count: a[1] }, { label: b[0], count: b[1] })), [matches]);
   const regionCounts = useMemo(() => matches.reduce((map, match) => map.set(match.region, (map.get(match.region) || 0) + 1), new Map<string, number>()), [matches]);
   const competitionCounts = useMemo(() => matches.reduce((map, match) => {
     if (match.tournamentId) map.set(match.tournamentId, (map.get(match.tournamentId) || 0) + 1);
     return map;
   }, new Map<string, number>()), [matches]);
-  const upcoming = useMemo(() => matches.filter(isFutureMatch).sort((a, b) => a.datetime.localeCompare(b.datetime)), [matches]);
+  const upcoming = useMemo(() => matches.filter(isFutureMatch).sort(compareDateAsc), [matches]);
   const completedCount = matches.filter((match) => matchBucket(match) === "completed").length;
   const pendingCount = matches.filter((match) => matchBucket(match) === "pending").length;
   const teamCount = new Set(matches.flatMap((match) => [match.team1Id || match.team1, match.team2Id || match.team2])).size;
@@ -227,13 +229,7 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
       .filter((match) => yearFilter === "all" || match.datetime.startsWith(`${yearFilter}-`))
       .filter((match) => competitionFilter === "all" || match.tournamentId === competitionFilter)
       .filter((match) => !needle || [match.team1, match.team2, match.event, match.stage, match.phase, regionName(match.region)].join(" ").toLowerCase().includes(needle))
-      .sort((a, b) => {
-        if (status === "completed") return b.datetime.localeCompare(a.datetime);
-        if (status === "upcoming") return a.datetime.localeCompare(b.datetime);
-        const aFuture = isFutureMatch(a) ? 0 : 1;
-        const bFuture = isFutureMatch(b) ? 0 : 1;
-        return aFuture - bFuture || (aFuture ? b.datetime.localeCompare(a.datetime) : a.datetime.localeCompare(b.datetime));
-      });
+      .sort((a, b) => compareMatchSchedule(a, b, status, isFutureMatch));
   }, [competitionFilter, eventFilter, matches, query, region, status, yearFilter]);
 
   async function refreshSchedule() {
@@ -362,20 +358,20 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
           <div><p className="eyebrow">OWTV MATCHES</p><h2>{zh ? "比赛" : "Matches"}</h2><span>{matches.length} {zh ? "场比赛" : "matches"} · {eventCounts.length} {zh ? "项赛事" : "events"}</span></div>
           <div className="owtv-head-actions">
             <div className="owtv-view-switch" aria-label={zh ? "切换比赛布局" : "Change match layout"}>
-              <button className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><LayoutGrid size={17} />{zh ? "卡片" : "Cards"}</button>
-              <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={17} />{zh ? "列表" : "List"}</button>
+              <button aria-pressed={viewMode === "cards"} className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><LayoutGrid size={17} />{zh ? "卡片" : "Cards"}</button>
+              <button aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={17} />{zh ? "列表" : "List"}</button>
             </div>
             <button className="balance-jump" onClick={onOpenBalance}><Trophy size={18} />{zh ? "英雄更新" : "Hero Updates"}</button>
           </div>
         </header>
 
         <nav className="owtv-status-tabs" aria-label={zh ? "比赛状态" : "Match status"}>
-          {([['upcoming', `${zh ? "即将开始" : "Upcoming"} ${upcoming.length}`], ['completed', `${zh ? "比赛结果" : "Results"} ${completedCount}`], ['all', `${zh ? "全部" : "All"} ${matches.length}`], ['pending', `${zh ? "待核赛果" : "Pending"} ${pendingCount}`]] as const).map(([value, label]) => <button key={value} className={status === value ? "active" : ""} onClick={() => { setStatus(value); setVisibleCount(24); }}>{label}</button>)}
+          {([['upcoming', `${zh ? "即将开始" : "Upcoming"} ${upcoming.length}`], ['completed', `${zh ? "比赛结果" : "Results"} ${completedCount}`], ['all', `${zh ? "全部" : "All"} ${matches.length}`], ['pending', `${zh ? "待核赛果" : "Pending"} ${pendingCount}`]] as const).map(([value, label]) => <button key={value} aria-pressed={status === value} className={status === value ? "active" : ""} onClick={() => { setStatus(value); setVisibleCount(24); }}>{label}</button>)}
         </nav>
 
         <nav className="owtv-region-tabs" aria-label={zh ? "赛区" : "Regions"}>
-          <button className={region === "all" ? "active" : ""} onClick={() => { setRegion("all"); setVisibleCount(24); }}>{zh ? "全部赛区" : "All regions"}</button>
-          {regions.map((value) => <button key={value} className={region === value ? "active" : ""} onClick={() => { setRegion(value); setVisibleCount(24); }}>{regionName(value, locale)}<b>{regionCounts.get(value) ?? 0}</b></button>)}
+          <button aria-pressed={region === "all"} className={region === "all" ? "active" : ""} onClick={() => { setRegion("all"); setVisibleCount(24); }}>{zh ? "全部赛区" : "All regions"}</button>
+          {regions.map((value) => <button key={value} aria-pressed={region === value} className={region === value ? "active" : ""} onClick={() => { setRegion(value); setVisibleCount(24); }}>{regionName(value, locale)}<b>{regionCounts.get(value) ?? 0}</b></button>)}
         </nav>
 
         <div className="owtv-filter-bar">
@@ -406,7 +402,7 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
           {filtered.slice(0, visibleCount).map((match) => {
             const meta = statusMeta(match, locale);
             return (
-              <article className="owtv-match-card" key={match.id} role="button" tabIndex={0} aria-label={zh ? `查看 ${match.team1} 对阵 ${match.team2} 的比赛详情` : `View match details for ${match.team1} versus ${match.team2}`} onClick={() => void openMatchDetail(match)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openMatchDetail(match); } }}>
+              <article className="owtv-match-card" key={match.id} role="button" tabIndex={0} data-datetime={match.datetime} data-status={matchBucket(match)} aria-label={zh ? `查看 ${match.team1} 对阵 ${match.team2} 的比赛详情` : `View match details for ${match.team1} versus ${match.team2}`} onClick={() => void openMatchDetail(match)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openMatchDetail(match); } }}>
                 <header>
                   <div><strong>{activeDateFormatter.format(new Date(match.datetime))}</strong><time>{timeFormatter.format(new Date(match.datetime))}</time></div>
                   <em className={meta.className}>{meta.label}</em>
