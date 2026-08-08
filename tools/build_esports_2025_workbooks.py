@@ -161,7 +161,13 @@ def number(value: str) -> float:
 
 
 def main() -> None:
-    records: set[tuple[int, str, str, str, str, str, bool]] = set()
+    # A workbook sheet can reuse the same week/day/game header for different
+    # fixtures.  The old key only used that header, which merged unrelated
+    # series and could assign lower-side players to the last fixture sharing
+    # the label.  Keep the two team names in the series identity and retain a
+    # stable per-card key for the individual map appearance.
+    records: set[tuple[int, str, str, str, str, str, str, str]] = set()
+    series_sides: dict[str, tuple[str, str]] = {}
     role_by_hero: dict[str, str] = {}
     source_sheet_counts: dict[str, int] = {}
 
@@ -196,54 +202,31 @@ def main() -> None:
                 map_name = str(cells.get((base + 8, 3 + 17 * segment), "")).strip()
                 header = str(cells.get((base, 4 + 17 * segment), "")).strip()
                 top_team = clean_team(cells.get((base, 6 + 17 * segment)))
-                if not player or not map_name or not header or not top_team:
+                bottom_team = clean_team(cells.get((base + 15, 6 + 17 * segment)))
+                if not player or not map_name or not header or not top_team or not bottom_team:
                     continue
                 is_top = player_row in {base + 1, base + 4}
-                match_key = f"S{stage}:{sheet_name}:{header}"
-                records.add((stage, sheet_name, match_key, map_name, player, hero, is_top))
+                header_base = re.sub(r"\s*\|\s*Map\s+\d+\s*$", "", header, flags=re.IGNORECASE)
+                series_key = f"S{stage}:{sheet_name}:{header_base} | {top_team} vs {bottom_team}"
+                card_key = f"{series_key}:card:{base}:{segment}"
+                team = top_team if is_top else bottom_team
+                series_sides[series_key] = (top_team, bottom_team)
+                records.add((stage, sheet_name, series_key, card_key, map_name, player, team, hero))
                 accepted += 1
             source_sheet_counts[f"Stage {stage} · {sheet_name}"] = accepted
 
-    # Every 17-row map card contains both team names.  Resolve the team from the
-    # same card instead of inferring it from a player's other appearances.  The
-    # old inference corrupted transfers and every player seen only on the lower
-    # side of a card.
-    match_sides: dict[tuple[int, str, str], tuple[str, str]] = {}
-    for stage, path in WORKBOOKS.items():
-        sheets = workbook_sheets(path)
-        for sheet_name, (cells, _drawings) in sheets.items():
-            if sheet_name in EXCLUDED_SHEETS:
-                continue
-            max_row = max((row for row, _col in cells), default=0)
-            max_col = max((col for _row, col in cells), default=0)
-            for base in range(2, max_row + 1, 17):
-                for segment in range((max_col + 16) // 17):
-                    header = str(cells.get((base, 4 + 17 * segment), "")).strip()
-                    top_team = clean_team(cells.get((base, 6 + 17 * segment)))
-                    bottom_team = clean_team(cells.get((base + 15, 6 + 17 * segment)))
-                    if not header or not top_team or not bottom_team:
-                        continue
-                    match_key = f"S{stage}:{sheet_name}:{header}"
-                    match_sides[(stage, sheet_name, match_key)] = (top_team, bottom_team)
-
-    detailed = []
-    for stage, sheet, match_key, map_name, player, hero, is_top in records:
-        sides = match_sides.get((stage, sheet, match_key))
-        if not sides:
-            continue
-        team = sides[0] if is_top else sides[1]
-        detailed.append((stage, sheet, match_key, map_name, player, team, hero))
+    detailed = list(records)
 
     # The workbooks contain capitalization-only variants (Guxue/guxue,
     # WhoRU/Whoru, etc.). Collapse those identities before any aggregation so
     # rosters and player rankings cannot split one person into multiple rows.
     player_variants: dict[str, set[str]] = defaultdict(set)
-    for _stage, _sheet, _match, _map, player, _team, _hero in detailed:
+    for _stage, _sheet, _series, _card, _map, player, _team, _hero in detailed:
         player_variants[player_identity(player)].add(player)
     canonical_players = {key: preferred_player_name(values) for key, values in player_variants.items()}
     detailed = [
-        (stage, sheet, match_key, map_name, canonical_players[player_identity(player)], team, hero)
-        for stage, sheet, match_key, map_name, player, team, hero in detailed
+        (stage, sheet, series_key, card_key, map_name, canonical_players[player_identity(player)], team, hero)
+        for stage, sheet, series_key, card_key, map_name, player, team, hero in detailed
         if (team, hero) not in EXCLUDED_UNVERIFIED_APPEARANCES
     ]
 
@@ -255,11 +238,11 @@ def main() -> None:
     map_usage: dict[tuple[str, str, str], set[str]] = defaultdict(set)
     overall: dict[tuple[str, str], set[str]] = defaultdict(set)
     match_usage: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
+    match_maps: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
     match_players: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
-    match_teams: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for stage, sheet, match_key, map_name, player, team, hero in detailed:
+    for stage, sheet, series_key, card_key, map_name, player, team, hero in detailed:
         tournament = f"2025 OWCS Stage {stage} · {sheet}"
-        sample = f"{match_key}:{map_name}"
+        sample = card_key
         role = role_by_hero.get(hero, "")
         player_usage[(player, team, hero)].add(sample)
         team_usage[(team, hero, role)].add(sample)
@@ -268,10 +251,9 @@ def main() -> None:
         tournament_teams[(tournament, team, hero, role)].add(sample)
         map_usage[(map_name, hero, role)].add(sample)
         overall[(hero, role)].add(sample)
-        series_key = re.sub(r"\s*\|\s*Map\s+\d+\s*$", "", match_key, flags=re.IGNORECASE)
-        match_usage[(tournament, series_key, team, hero)].add(map_name)
+        match_usage[(tournament, series_key, team, hero)].add(sample)
+        match_maps[(tournament, series_key, team, hero)].add(map_name)
         match_players[(tournament, series_key, team, hero)].add(player)
-        match_teams[(tournament, series_key)].add(team)
 
     performance_rows = load_performance()
     performance_groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
@@ -301,15 +283,14 @@ def main() -> None:
                 for key, samples in sorted(bucket.items())]
 
     matches = {
-        re.sub(r"\s*\|\s*Map\s+\d+\s*$", "", match_key, flags=re.IGNORECASE)
-        for _stage, _sheet, match_key, _map, _player, _team, _hero in detailed
+        series_key for _stage, _sheet, series_key, _card, _map, _player, _team, _hero in detailed
     }
     payload = {
         "schemaVersion": 2, "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "source": "OWCS 2025 community map-composition workbooks + FACEIT Stage 1 performance telemetry",
         "sourceUrls": SOURCE_URLS, "firstSeason": 2025, "lastSeason": 2025, "seasons": [2025],
-        "matchCount": len(matches), "playerCount": len({row[4] for row in detailed}),
-        "teamCount": len({row[5] for row in detailed if row[5] != "Unknown"}),
+        "matchCount": len(matches), "playerCount": len({row[5] for row in detailed}),
+        "teamCount": len({row[6] for row in detailed if row[6] != "Unknown"}),
         "rawRowCount": len(detailed) + len(performance_rows),
         "coverage": "Post-match settlement heroes for 2025 OWCS Stage 1/2/3 and global events; FACEIT player performance is Stage 1 NA/EMEA only",
         "usageUnit": "post_match_settlement_hero",
@@ -327,12 +308,12 @@ def main() -> None:
         "mapHeroUsage": usage_rows(map_usage, ("map_name", "hero_name", "role")),
         "matchHeroUsage": [
             {"tournament_sheet": key[0], "match_id": key[1], "match_title": key[1],
-             "team_top": sorted(match_teams[(key[0], key[1])])[0] if match_teams[(key[0], key[1])] else "",
-             "team_bottom": sorted(match_teams[(key[0], key[1])])[1] if len(match_teams[(key[0], key[1])]) > 1 else "",
-             "team_name": key[2], "hero_name": key[3], "usage_count": str(len(maps)),
-             "evidence_maps": sorted(maps), "evidence_players": sorted(match_players[key]),
+             "team_top": series_sides.get(key[1], ("", ""))[0],
+             "team_bottom": series_sides.get(key[1], ("", ""))[1],
+             "team_name": key[2], "hero_name": key[3], "usage_count": str(len(samples)),
+             "evidence_maps": sorted(match_maps[key]), "evidence_players": sorted(match_players[key]),
              "damage_verified": False, "metric": "post_match_settlement_hero"}
-            for key, maps in sorted(match_usage.items())
+            for key, samples in sorted(match_usage.items())
         ],
     }
     OUTPUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

@@ -53,7 +53,7 @@ fn fetch_owtv_match_index(app: tauri::AppHandle) -> Result<Value, String> {
         SELECT m.id, m.slug, COALESCE(m.start_date, ''), m.complete, m.is_live, m.has_started,
                COALESCE(t1.id, 0), COALESCE(t1.name, m.team1_placeholder, '待定'), COALESCE(t1.image_url, t1.thumbnail_url, ''),
                COALESCE(t2.id, 0), COALESCE(t2.name, m.team2_placeholder, '待定'), COALESCE(t2.image_url, t2.thumbnail_url, ''),
-               CAST(m.team1_score AS INTEGER), CAST(m.team2_score AS INTEGER),
+               CAST(m.team1_score AS REAL), CAST(m.team2_score AS REAL),
                COALESCE(tr.name, 'OWTV 职业比赛'), COALESCE(tr.slug, ''), COALESCE(m.region_slug, ''), m.source_url,
                (SELECT COUNT(*) FROM match_maps mm WHERE mm.match_id = m.id),
                (SELECT COUNT(*) FROM player_map_stats pms WHERE pms.match_id = m.id)
@@ -85,8 +85,8 @@ fn fetch_owtv_match_index(app: tauri::AppHandle) -> Result<Value, String> {
             "team2Id": format!("owtv-team:{}", row.get::<_, i64>(9)?),
             "team1Logo": row.get::<_, String>(8)?,
             "team2Logo": row.get::<_, String>(11)?,
-            "score1": row.get::<_, Option<i64>>(12)?,
-            "score2": row.get::<_, Option<i64>>(13)?,
+            "score1": row.get::<_, Option<f64>>(12)?,
+            "score2": row.get::<_, Option<f64>>(13)?,
             "event": tournament_name,
             "region": row.get::<_, String>(16)?,
             "phase": if stat_count > 0 { "含选手数据" } else if map_count > 0 { "仅地图与赛果" } else { "仅赛果" },
@@ -133,7 +133,7 @@ fn fetch_owtv_match_detail(
                COALESCE(tr.name, ''), COALESCE(m.region_slug, ''),
                COALESCE(t1.id, 0), COALESCE(t1.name, m.team1_placeholder, ''), COALESCE(t1.image_url, ''),
                COALESCE(t2.id, 0), COALESCE(t2.name, m.team2_placeholder, ''), COALESCE(t2.image_url, ''),
-               CAST(m.team1_score AS INTEGER), CAST(m.team2_score AS INTEGER), m.source_url
+               CAST(m.team1_score AS REAL), CAST(m.team2_score AS REAL), m.source_url
         FROM matches m
         LEFT JOIN tournaments tr ON tr.id = m.tournament_id
         LEFT JOIN teams t1 ON t1.id = m.team1_id
@@ -147,7 +147,7 @@ fn fetch_owtv_match_detail(
             "region": row.get::<_, String>(6)?,
             "team1": { "id": row.get::<_, i64>(7)?, "name": row.get::<_, String>(8)?, "logo": row.get::<_, String>(9)? },
             "team2": { "id": row.get::<_, i64>(10)?, "name": row.get::<_, String>(11)?, "logo": row.get::<_, String>(12)? },
-            "score1": row.get::<_, Option<i64>>(13)?, "score2": row.get::<_, Option<i64>>(14)?,
+            "score1": row.get::<_, Option<f64>>(13)?, "score2": row.get::<_, Option<f64>>(14)?,
             "sourceUrl": row.get::<_, String>(15)?,
         }))
     };
@@ -164,7 +164,7 @@ fn fetch_owtv_match_detail(
 
     let mut map_statement = connection.prepare(r#"
         SELECT mm.id, mm.map_index, COALESCE(mc.name, 'TBD'), COALESCE(mc.mode, ''),
-               CAST(mm.team1_score AS INTEGER), CAST(mm.team2_score AS INTEGER), mm.complete, mm.team1_ban, mm.team2_ban,
+               CAST(mm.team1_score AS REAL), CAST(mm.team2_score AS REAL), mm.complete, mm.team1_ban, mm.team2_ban,
                mm.map_picker, mm.map_picker_type, COALESCE(mm.replay_code, '')
         FROM match_maps mm LEFT JOIN map_catalog mc ON mc.id = mm.map_id
         WHERE mm.match_id = ?1 ORDER BY mm.map_index
@@ -175,7 +175,7 @@ fn fetch_owtv_match_detail(
         Ok(json!({
             "id": row.get::<_, i64>(0)?, "index": row.get::<_, i64>(1)?,
             "name": row.get::<_, String>(2)?, "mode": row.get::<_, String>(3)?,
-            "score1": row.get::<_, Option<i64>>(4)?, "score2": row.get::<_, Option<i64>>(5)?,
+            "score1": row.get::<_, Option<f64>>(4)?, "score2": row.get::<_, Option<f64>>(5)?,
             "complete": row.get::<_, i64>(6)? != 0,
             "team1Ban": team1_ban.map(|id| json!({ "id": id, "name": owtv_hero_name(Some(id)).unwrap_or("Unknown") })),
             "team2Ban": team2_ban.map(|id| json!({ "id": id, "name": owtv_hero_name(Some(id)).unwrap_or("Unknown") })),
@@ -186,7 +186,7 @@ fn fetch_owtv_match_detail(
     let maps = map_rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("读取地图失败：{error}"))?;
 
     let mut stat_statement = connection.prepare(r#"
-        SELECT pms.match_map_id, pms.team_id, pms.player_id, COALESCE(p.name, p.alias, 'Unknown'),
+        SELECT pms.match_map_id, pms.team_id, pms.player_id, COALESCE(NULLIF(TRIM(p.alias), ''), NULLIF(TRIM(p.name), ''), 'Unknown'),
                COALESCE(p.role, pms.role, ''), COALESCE(p.image_url, ''),
                pms.eliminations, pms.assists, pms.deaths, pms.damage_dealt,
                pms.healing_done, pms.damage_mitigated, pms.fantasy_score,

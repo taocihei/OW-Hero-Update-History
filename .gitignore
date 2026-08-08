@@ -10,7 +10,12 @@ __pycache__/
 *.py[cod]
 
 # Raw collectors and large local archives are reproducible and are not source files.
-data/
+# Keep the compact runtime database required by `include_bytes!`; ignore all
+# other raw collector output and working copies.
+data/*
+!data/owtv/
+data/owtv/*
+!data/owtv/owtv.sqlite3
 .tmp-vods/
 artifacts/
 owtv_chunks/

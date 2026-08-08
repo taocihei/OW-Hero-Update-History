@@ -46,7 +46,7 @@ src-tauri\target\release\bundle\nsis\
 ## 数据说明
 
 - 仓库包含应用运行所需的压缩本地快照。
-- 原始 SQLite、赛事工作簿、Stats Lab 压缩包和临时视频不纳入 Git；采集与转换脚本位于 `tools/`。
+- 构建和离线运行所需的 `data/owtv/owtv.sqlite3` 随仓库保存；其他采集工作库、赛事工作簿、Stats Lab 压缩包和临时视频不纳入 Git。采集与转换脚本位于 `tools/`。
 - 英雄更新主要来源于暴雪官方补丁页面。
 - OWTV 部分旧比赛只有对阵、比分、地图或禁用信息，不一定提供英雄阵容及伤害数据。
 
@@ -60,7 +60,7 @@ src-tauri\target\release\bundle\nsis\
 
 ## 当前版本
 
-`v0.10.34`
+`v0.10.35`
 
 ## ?????
 
@@ -69,4 +69,3 @@ src-tauri\target\release\bundle\nsis\
 ![????](docs/sponsor.jpg)
 
 ??????????`1012969672`?
-

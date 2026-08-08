@@ -42,6 +42,14 @@ def main() -> None:
     check(not any(float(row.get("pick_rate", 0)) for row in payload["teamHeroUsage"]), "unsupported 2025 pick rates remain")
     check(not any(row.get("damage_verified") for row in payload["playerHeroUsage"]), "2025 rows must not claim per-hero damage verification")
     check(not any(row.get("metric") != "post_match_settlement_hero" for row in payload["playerHeroUsage"]), "2025 rows must use settlement-hero evidence")
+    check(
+        not any(row.get("team_name") not in {row.get("team_top"), row.get("team_bottom")} for row in payload["matchHeroUsage"]),
+        "match hero usage contains a team outside its fixture",
+    )
+    check(
+        not any(int(row.get("usage_count", 0)) < len(set(row.get("evidence_maps") or [])) for row in payload["matchHeroUsage"]),
+        "match hero usage is smaller than its map evidence",
+    )
 
     team_counts: dict[tuple[str, str], int] = {
         (row["team_name"], row["hero_name"]): int(row["usage_count"])
@@ -51,6 +59,16 @@ def main() -> None:
         player_count = int(row["usage_count"])
         team_count = team_counts.get((row["team_name"], row["hero_name"]), 0)
         check(player_count <= team_count, f"player count exceeds team count: {row}")
+
+    match_team_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for row in payload["matchHeroUsage"]:
+        match_team_counts[(row["team_name"], row["hero_name"])] += int(row["usage_count"])
+    aggregate_mismatches = [
+        (team, hero, total, match_team_counts.get((team, hero), 0))
+        for (team, hero), total in team_counts.items()
+        if total != match_team_counts.get((team, hero), 0)
+    ]
+    check(not aggregate_mismatches, f"team totals differ from match evidence: {aggregate_mismatches[:5]}")
 
     symmetra_players = {
         "Quartz": count(payload["playerHeroUsage"], player_name="Quartz", hero_name="Symmetra"),
@@ -63,7 +81,7 @@ def main() -> None:
         "Once Again": count(payload["teamHeroUsage"], team_name="Once Again", hero_name="Symmetra"),
     }
     check(symmetra_players == {"Quartz": 41, "Youbi": 25, "Leave": 34}, f"Symmetra player anchors changed: {symmetra_players}")
-    check(symmetra_teams == {"Twisted Minds": 75, "Weibo Gaming": 51, "Once Again": 0}, f"Symmetra team anchors changed: {symmetra_teams}")
+    check(symmetra_teams == {"Twisted Minds": 76, "Weibo Gaming": 51, "Once Again": 0}, f"Symmetra team anchors changed: {symmetra_teams}")
     check(symmetra_players["Quartz"] > symmetra_players["Leave"], "Quartz must rank above Leave in the audited 2025 map log")
     check(symmetra_teams["Twisted Minds"] > symmetra_teams["Weibo Gaming"], "Twisted Minds must rank above Weibo Gaming")
     check(symmetra_teams["Once Again"] == 0, "Once Again must not contain an unverified Symmetra composition")
@@ -89,9 +107,14 @@ def main() -> None:
             "playerPerformanceRows": len(payload["playerPerformance"]),
             "playerHeroRows": len(payload["playerHeroUsage"]),
             "teamHeroRows": len(payload["teamHeroUsage"]),
+            "matchHeroRows": len(payload["matchHeroUsage"]),
         },
         "symmetraPlayers": symmetra_players,
         "symmetraTeams": symmetra_teams,
+        "checks": {
+            "nonParticipantMatchRows": sum(row.get("team_name") not in {row.get("team_top"), row.get("team_bottom")} for row in payload["matchHeroUsage"]),
+            "aggregateMismatches": len(aggregate_mismatches),
+        },
         "eventAggregateCounts": dict(sorted(event_counts.items())),
     }
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

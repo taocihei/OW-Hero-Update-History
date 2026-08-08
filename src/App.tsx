@@ -72,30 +72,36 @@ function formatDate(date: string) {
 
 type PatchRegion = "asia" | "china";
 
-const patchRegionMeta = {
+const patchRegionMetaZh = {
   asia: { label: "亚服", detail: "暴雪全球版本 · 繁中官网" },
   china: { label: "国服", detail: "网易暴雪国服 · 简中官网" },
 } satisfies Record<PatchRegion, { label: string; detail: string }>;
 
-function regionalSource(change: BalanceChange, region: PatchRegion) {
+const patchRegionMetaEn = {
+  asia: { label: "Asia", detail: "Blizzard global · Traditional Chinese" },
+  china: { label: "China", detail: "NetEase Blizzard · Simplified Chinese" },
+} satisfies Record<PatchRegion, { label: string; detail: string }>;
+
+function regionalSource(change: BalanceChange, region: PatchRegion, locale: UiLanguage) {
+  const zh = locale === "zh";
   const match = change.sourceUrl.match(/\/news\/patch-notes\/(live|experimental|beta|ptr)\/(\d{4})\/(\d{1,2})\//);
-  if (!match) return { url: change.sourceUrl, label: change.sourceLabel, badge: "暴雪官方" };
+  if (!match) return { url: change.sourceUrl, label: zh ? change.sourceLabel : "Official Blizzard patch", badge: zh ? "暴雪官方" : "Blizzard · Official" };
   const [, channel, year, monthValue] = match;
   const month = monthValue.padStart(2, "0");
   const asiaUrl = `https://overwatch.blizzard.com/zh-tw/news/patch-notes/${channel}/${year}/${month}/`;
 
-  if (region === "asia") return { url: asiaUrl, label: "亚服官方补丁", badge: "亚服 · 官方" };
+  if (region === "asia") return { url: asiaUrl, label: zh ? "亚服官方补丁" : "Asia official patch", badge: zh ? "亚服 · 官方" : "Asia · Official" };
   if (change.date >= "2025-02-01") {
     return {
       url: `https://ow.blizzard.cn/news/patch-notes/${channel}/${year}/${month}/`,
-      label: "国服官方补丁",
-      badge: "国服 · 官方",
+      label: zh ? "国服官方补丁" : "China official patch",
+      badge: zh ? "国服 · 官方" : "China · Official",
     };
   }
   if (change.date >= "2023-01-24") {
-    return { url: asiaUrl, label: "亚服官方补丁（国服停服期）", badge: "停服期 · 亚服官方" };
+    return { url: asiaUrl, label: zh ? "亚服官方补丁（国服停服期）" : "Asia official patch (China service hiatus)", badge: zh ? "停服期 · 亚服官方" : "Hiatus · Asia official" };
   }
-  return { url: change.sourceUrl, label: "暴雪官方历史补丁", badge: "国服历史期 · 官方" };
+  return { url: change.sourceUrl, label: zh ? "暴雪官方历史补丁" : "Official Blizzard historical patch", badge: zh ? "国服历史期 · 官方" : "Historical · Official" };
 }
 
 function App() {
@@ -122,8 +128,15 @@ function App() {
   const [historyError, setHistoryError] = useState("");
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => (localStorage.getItem("balance-atlas:language") === "en" ? "en" : "zh"));
 
+  const zh = uiLanguage === "zh";
   const kindMeta = uiLanguage === "zh" ? kindMetaZh : kindMetaEn;
   const trackMeta = uiLanguage === "zh" ? trackMetaZh : trackMetaEn;
+  const patchRegionMeta = uiLanguage === "zh" ? patchRegionMetaZh : patchRegionMetaEn;
+
+  useEffect(() => {
+    document.documentElement.lang = zh ? "zh-CN" : "en";
+    document.title = zh ? "OW英雄更新历史" : "OW Hero Update History";
+  }, [zh]);
 
   const selectedCatalog = roster.items.find((item) => item.key === selectedHeroKey) ?? roster.items[0];
   const archivedHero = heroes.find((item) => item.id === selectedHeroKey);
@@ -132,7 +145,9 @@ function App() {
     id: selectedCatalog.key,
     name: uiLanguage === "zh" ? selectedCatalog.name : selectedCatalog.englishName,
     englishName: selectedCatalog.englishName.toUpperCase(),
-    role: ({ tank: "坦克", damage: "输出", support: "支援" } as Record<string, string>)[selectedCatalog.role] ?? selectedCatalog.role,
+    role: (zh
+      ? ({ tank: "坦克", damage: "输出", support: "支援" } as Record<string, string>)
+      : ({ tank: "Tank", damage: "Damage", support: "Support" } as Record<string, string>))[selectedCatalog.role] ?? selectedCatalog.role,
     archetype: "",
     debutDate: generatedChanges[0].date,
     accent: "#0d9cac",
@@ -156,10 +171,10 @@ function App() {
     name: selectedCatalog?.name ?? selectedHeroKey,
     englishName: (selectedCatalog?.englishName ?? selectedHeroKey).toUpperCase(),
     role: selectedCatalog?.role ?? "damage",
-    archetype: "官方阵容 / 档案待同步",
+    archetype: zh ? "官方阵容 / 档案待同步" : "Official roster / archive pending",
     debutDate: new Date().toISOString().slice(0, 10),
     accent: "#0d9cac",
-    quote: "英雄名单已经同步，完整平衡记录将在后续数据更新中补齐。",
+    quote: zh ? "英雄名单已经同步，完整平衡记录将在后续数据更新中补齐。" : "The official roster is synced. Balance history will appear when the archive is updated.",
     changes: [],
   };
   const hasArchive = hero.changes.length > 0;
@@ -331,17 +346,17 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="返回顶部">
+        <a className="brand" href="#top" aria-label={zh ? "返回顶部" : "Back to top"}>
           <span className="brand-mark"><FlaskConical size={21} /></span>
-          <span><b>OW 英雄</b><em>更新历史</em></span>
+          <span><b>{zh ? "OW 英雄" : "OW HEROES"}</b><em>{zh ? "更新历史" : "UPDATE HISTORY"}</em></span>
         </a>
 
-        <nav className={mobileNav ? "nav open" : "nav"} aria-label="主导航">
+        <nav className={mobileNav ? "nav open" : "nav"} aria-label={zh ? "主导航" : "Primary navigation"}>
           <button className={`view-tab ${view === "matches" ? "active" : ""}`} onClick={() => { setView("matches"); setMobileNav(false); window.scrollTo({ top: 0 }); }}>
-            <Swords size={15} />职业比赛
+            <Swords size={15} />{zh ? "职业比赛" : "Pro Matches"}
           </button>
           <button className={`view-tab ${view === "balance" ? "active" : ""}`} onClick={() => { setView("balance"); setMobileNav(false); window.scrollTo({ top: 0 }); }}>
-            <BookOpenCheck size={15} />英雄更新
+            <BookOpenCheck size={15} />{zh ? "英雄更新" : "Hero Updates"}
           </button>
         </nav>
 
@@ -350,9 +365,9 @@ function App() {
             const next = language === "zh" ? "en" : "zh";
             localStorage.setItem("balance-atlas:language", next);
             return next;
-          })} aria-label="切换中英文">{uiLanguage === "zh" ? "中文" : "EN"}</button>
+          })} aria-label={zh ? "切换为英文" : "Switch to Chinese"} lang={zh ? "zh-CN" : "en"}>{zh ? "中文" : "EN"}</button>
           <span className="live-pill" title={historyError || rosterError}><i /> {view === "matches"
-            ? "OWCS 官方赛程"
+            ? (zh ? "OWCS 官方赛程" : "OWCS official schedule")
             : historySyncing
               ? (uiLanguage === "zh" ? "正在采集官网更新" : "Syncing official patches")
               : rosterSyncing
@@ -360,7 +375,7 @@ function App() {
                 : uiLanguage === "zh"
                   ? `${officialPatchCount(historyState)} 个官网版本 · ${historyPatchCount(historyState)} 个含英雄调整 · ${historyRecordCount(historyState)} 条记录`
                   : `${officialPatchCount(historyState)} official patches · ${historyPatchCount(historyState)} with hero changes · ${historyRecordCount(historyState)} records`}</span>
-          <button className="icon-button menu-button" onClick={() => setMobileNav((value) => !value)} aria-label={"\u6253\u5f00\u83dc\u5355"}>
+          <button className="icon-button menu-button" onClick={() => setMobileNav((value) => !value)} aria-label={zh ? "打开菜单" : "Open menu"}>
             <Menu size={20} />
           </button>
         </div>
@@ -370,15 +385,15 @@ function App() {
         <MatchCenter locale={uiLanguage} onOpenBalance={() => { setView("balance"); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
       ) : (
       <main id="top">
-        <section className="hero-control-strip" aria-label="英雄与服务器版本选择">
-          <button className="hero-switch-trigger" onClick={() => setShowHeroPicker(true)} aria-label={`切换英雄，当前为${hero.name}`}>
+        <section className="hero-control-strip" aria-label={zh ? "英雄与服务器版本选择" : "Hero and regional patch selection"}>
+          <button className="hero-switch-trigger" onClick={() => setShowHeroPicker(true)} aria-label={zh ? `切换英雄，当前为${hero.name}` : `Change hero, currently ${hero.name}`}>
             {selectedPortrait && <img src={selectedPortrait} alt="" />}
-            <span><small>当前查看英雄</small><strong>{hero.name}</strong><em>{hero.englishName}</em></span>
-            <b>切换英雄</b><ChevronDown size={19} />
+            <span><small>{zh ? "当前查看英雄" : "Current hero"}</small><strong>{hero.name}</strong><em>{hero.englishName}</em></span>
+            <b>{zh ? "切换英雄" : "Change hero"}</b><ChevronDown size={19} />
           </button>
-          <div className="region-audit"><ShieldCheck size={18} /><span><strong>当前收录记录数值一致</strong><small>已核对国服与亚服官方补丁；活动、奖励及运营说明可能不同</small></span></div>
-          <div className="patch-region-selector" aria-label="选择补丁服务器">
-            <span>补丁来源</span>
+          <div className="region-audit"><ShieldCheck size={18} /><span><strong>{zh ? "当前收录记录数值一致" : "Recorded balance values match"}</strong><small>{zh ? "已核对国服与亚服官方补丁；活动、奖励及运营说明可能不同" : "China and Asia official patches checked; events and service notices may differ"}</small></span></div>
+          <div className="patch-region-selector" aria-label={zh ? "选择补丁服务器" : "Select patch region"}>
+            <span>{zh ? "补丁来源" : "Patch source"}</span>
             {(Object.keys(patchRegionMeta) as PatchRegion[]).map((region) => (
               <button key={region} className={patchRegion === region ? "active" : ""} onClick={() => setPatchRegion(region)}>
                 <strong>{patchRegionMeta[region].label}</strong><small>{patchRegionMeta[region].detail}</small>
@@ -399,26 +414,26 @@ function App() {
             </div>
             {hero.quote && <p className="hero-thesis">{hero.quote}</p>}
             {hasArchive && <div className="life-range">
-              <div className="range-point start"><span>{isCuratedArchive ? "登场" : "首条记录"}</span><strong>{formatDate(hero.debutDate)}</strong></div>
+              <div className="range-point start"><span>{isCuratedArchive ? (zh ? "登场" : "Debut") : (zh ? "首条记录" : "First record")}</span><strong>{formatDate(hero.debutDate)}</strong></div>
               <div className="range-track"><i /><i /><i /><i /><i /><i /><i /><i /><i /><b /></div>
-              <div className="range-point end"><span>当前</span><strong>持续维护</strong></div>
+              <div className="range-point end"><span>{zh ? "当前" : "Now"}</span><strong>{zh ? "持续维护" : "Maintained"}</strong></div>
             </div>}
           </div>
 
-          {hasArchive && <aside className="hero-summary" aria-label="档案概况">
-            <div className="summary-seal"><ShieldCheck size={19} /><span>{stats.official} 条官方来源 · {includeConsole ? "PC + 主机" : "仅 PC"}</span></div>
+          {hasArchive && <aside className="hero-summary" aria-label={zh ? "档案概况" : "Archive summary"}>
+            <div className="summary-seal"><ShieldCheck size={19} /><span>{stats.official} {zh ? "条官方来源" : "official sources"} · {includeConsole ? (zh ? "PC + 主机" : "PC + Console") : (zh ? "仅 PC" : "PC only")}</span></div>
             <dl>
-              <div title="正式服中出现该英雄调整的补丁日期数"><dt>正式服出现</dt><dd>{String(stats.patches).padStart(2, "0")}</dd></div>
-              <div><dt>增强</dt><dd className="buff-text">+{stats.buff}</dd></div>
-              <div><dt>削弱</dt><dd className="nerf-text">−{stats.nerf}</dd></div>
-              <div><dt>记录总数</dt><dd>{stats.total}</dd></div>
+              <div title={zh ? "正式服中出现该英雄调整的补丁日期数" : "Unique live patch dates containing changes to this hero"}><dt>{zh ? "正式服出现" : "Live patches"}</dt><dd>{String(stats.patches).padStart(2, "0")}</dd></div>
+              <div><dt>{zh ? "增强" : "Buffs"}</dt><dd className="buff-text">+{stats.buff}</dd></div>
+              <div><dt>{zh ? "削弱" : "Nerfs"}</dt><dd className="nerf-text">−{stats.nerf}</dd></div>
+              <div><dt>{zh ? "记录总数" : "Records"}</dt><dd>{stats.total}</dd></div>
             </dl>
-            <p><BookOpenCheck size={16} />每条记录均附暴雪官方网站链接</p>
+            <p><BookOpenCheck size={16} />{zh ? "每条记录均附暴雪官方网站链接" : "Every record links to official Blizzard patch notes"}</p>
           </aside>}
         </section>
 
         {hasArchive ? <>
-        <section className="track-summary" aria-label="版本分类总览">
+        <section className="track-summary" aria-label={zh ? "版本分类总览" : "Patch category overview"}>
           {(Object.keys(trackMeta) as ChangeTrack[]).map((track) => (
             <button key={track} className={`track-summary-card ${track} ${activeTracks.size === 1 && activeTracks.has(track) ? "isolated" : activeTracks.has(track) ? "active" : ""}`} onClick={() => focusTrack(track)} title={trackMeta[track].description}>
               <span>{trackMeta[track].short}</span>
@@ -446,7 +461,7 @@ function App() {
           </header>
           <div className="perk-record-grid">
             {perkChanges.slice(0, 3).map((change) => {
-              const source = regionalSource(change, patchRegion);
+              const source = regionalSource(change, patchRegion, uiLanguage);
               return <article
                 className={`perk-record ${change.kind}`}
                 key={`perk-${change.id}`}
@@ -495,7 +510,7 @@ function App() {
           </header>
           <div className="stadium-record-grid">
             {stadiumChanges.slice(0, 4).map((change) => {
-              const source = regionalSource(change, patchRegion);
+              const source = regionalSource(change, patchRegion, uiLanguage);
               return <article className={`stadium-record ${change.kind}`} key={`stadium-${change.id}`}>
                 <div><time>{formatDate(change.date)}</time><span className={`kind-label ${change.kind}`}>{kindMeta[change.kind].label}</span></div>
                 <h3>{change.title}</h3>
@@ -507,13 +522,13 @@ function App() {
           </div>
         </section>}
 
-        <section className="control-deck" id="timeline" aria-label="时间轴控制">
+        <section className="control-deck" id="timeline" aria-label={zh ? "时间轴控制" : "Timeline controls"}>
           <div className="search-box">
             <Search size={18} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索技能、数值或版本…" aria-label="搜索平衡记录" />
-            {query && <button onClick={() => setQuery("")} aria-label="清除搜索"><X size={15} /></button>}
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={zh ? "搜索技能、数值或版本…" : "Search ability, value, or patch…"} aria-label={zh ? "搜索平衡记录" : "Search balance records"} />
+            {query && <button onClick={() => setQuery("")} aria-label={zh ? "清除搜索" : "Clear search"}><X size={15} /></button>}
           </div>
-          <div className="filter-group" aria-label="按类型筛选">
+          <div className="filter-group" aria-label={zh ? "按类型筛选" : "Filter by change type"}>
             {(Object.keys(kindMeta) as ChangeKind[]).map((kind) => (
               <button key={kind} className={`filter-chip ${kind} ${activeKinds.has(kind) ? "active" : ""}`} onClick={() => toggleKind(kind)}>
                 <i />{kindMeta[kind].label}
@@ -521,25 +536,25 @@ function App() {
             ))}
           </div>
           <div className="control-tail">
-            <div className="history-view-selector" aria-label="选择历史显示方式">
-              <button className={historyView === "compact" ? "active" : ""} onClick={() => setHistoryView("compact")}>短全图</button>
-              <button className={historyView === "tree" ? "active" : ""} onClick={() => setHistoryView("tree")}>长树图</button>
+            <div className="history-view-selector" aria-label={zh ? "选择历史显示方式" : "Select history view"}>
+              <button className={historyView === "compact" ? "active" : ""} onClick={() => setHistoryView("compact")}>{zh ? "短全图" : "Overview"}</button>
+              <button className={historyView === "tree" ? "active" : ""} onClick={() => setHistoryView("tree")}>{zh ? "长树图" : "Timeline"}</button>
             </div>
-            <div className="platform-selector" aria-label="选择统计平台">
-              <span>平台</span>
-              <button className={!includeConsole ? "active" : ""} onClick={() => setIncludeConsole(false)}>仅 PC</button>
-              <button className={includeConsole ? "active" : ""} onClick={() => setIncludeConsole(true)}>PC + 主机</button>
+            <div className="platform-selector" aria-label={zh ? "选择统计平台" : "Select platform scope"}>
+              <span>{zh ? "平台" : "Platform"}</span>
+              <button className={!includeConsole ? "active" : ""} onClick={() => setIncludeConsole(false)}>{zh ? "仅 PC" : "PC only"}</button>
+              <button className={includeConsole ? "active" : ""} onClick={() => setIncludeConsole(true)}>{zh ? "PC + 主机" : "PC + Console"}</button>
             </div>
             {historyView === "tree" && <button className="sort-button" onClick={() => setAscending((value) => !value)}>
               {ascending ? <ArrowDownAZ size={17} /> : <ArrowUpAZ size={17} />}
-              {ascending ? "从登场开始" : "从最新开始"}
+              {ascending ? (zh ? "从登场开始" : "Oldest first") : (zh ? "从最新开始" : "Newest first")}
             </button>}
-            <button className="export-json-button" onClick={exportData} title="导出当前平台范围的完整英雄记录，格式为 JSON">
-              <Download size={16} />导出 JSON
+            <button className="export-json-button" onClick={exportData} title={zh ? "导出当前平台范围的完整英雄记录，格式为 JSON" : "Export the complete hero archive for the selected platform scope as JSON"}>
+              <Download size={16} />{zh ? "导出 JSON" : "Export JSON"}
             </button>
           </div>
-          <div className="track-filter-group" aria-label="按版本轨道筛选">
-            <span>版本轨道</span>
+          <div className="track-filter-group" aria-label={zh ? "按版本轨道筛选" : "Filter by patch track"}>
+            <span>{zh ? "版本轨道" : "Patch tracks"}</span>
             {(Object.keys(trackMeta) as ChangeTrack[]).map((track) => (
               <button key={track} className={`track-filter ${track} ${activeTracks.has(track) ? "active" : ""}`} onClick={() => toggleTrack(track)} title={trackMeta[track].description}>
                 <i />{trackMeta[track].label}<b>{stats.tracks[track]}</b>
@@ -548,21 +563,21 @@ function App() {
           </div>
         </section>
 
-        {historyView === "compact" ? <BalanceOverview changes={visibleChanges} debutDate={hero.debutDate} locale={uiLanguage} /> : <section className="timeline-section" aria-label="英雄平衡时间轴">
+        {historyView === "compact" ? <BalanceOverview changes={visibleChanges} debutDate={hero.debutDate} locale={uiLanguage} /> : <section className="timeline-section" aria-label={zh ? "英雄平衡时间轴" : "Hero balance timeline"}>
           <div className="axis-labels" aria-hidden="true">
-            <span><Swords size={14} />削弱侧</span>
-            <b>时间 / PATCH</b>
-            <span>增强侧<Sparkles size={14} /></span>
+            <span><Swords size={14} />{zh ? "削弱侧" : "NERFS"}</span>
+            <b>{zh ? "时间 / PATCH" : "DATE / PATCH"}</b>
+            <span>{zh ? "增强侧" : "BUFFS"}<Sparkles size={14} /></span>
           </div>
 
           <div className="timeline">
             <div className="timeline-origin">
               <span className="origin-dot" />
-              <div><small>{isCuratedArchive ? "ORIGIN" : "FIRST RECORD"}</small><strong>{formatDate(hero.debutDate)}</strong><p>{isCuratedArchive ? `${hero.name}随《守望先锋》正式登场` : "首条已收录的暴雪官方平衡记录"}</p></div>
+              <div><small>{isCuratedArchive ? "ORIGIN" : "FIRST RECORD"}</small><strong>{formatDate(hero.debutDate)}</strong><p>{isCuratedArchive ? (zh ? `${hero.name}随《守望先锋》正式登场` : `${hero.name} debuted in Overwatch`) : (zh ? "首条已收录的暴雪官方平衡记录" : "First recorded official Blizzard balance update")}</p></div>
             </div>
 
             {visibleChanges.map((change, index) => {
-              const source = regionalSource(change, patchRegion);
+              const source = regionalSource(change, patchRegion, uiLanguage);
               return (
               <article id={`change-${change.id}`} className={`change-row ${change.kind}`} key={change.id} style={{ "--order": index } as React.CSSProperties}>
                 <div className="change-date">
@@ -598,21 +613,21 @@ function App() {
             {visibleChanges.length === 0 && (
               <div className="empty-state">
                 <Search size={28} />
-                <h2>没有匹配的记录</h2>
-                <p>调整关键词或重新启用一种改动类型。</p>
-                <button className="button ghost" onClick={() => { setQuery(""); setActiveKinds(new Set(["buff", "nerf", "rework", "system"])); setActiveTracks(new Set(["core", "perk", "stadium", "experimental", "arcade"])); }}>清除筛选</button>
+                <h2>{zh ? "没有匹配的记录" : "No matching records"}</h2>
+                <p>{zh ? "调整关键词或重新启用一种改动类型。" : "Change the search or re-enable a change type."}</p>
+                <button className="button ghost" onClick={() => { setQuery(""); setActiveKinds(new Set(["buff", "nerf", "rework", "system"])); setActiveTracks(new Set(["core", "perk", "stadium", "experimental", "arcade"])); }}>{zh ? "清除筛选" : "Clear filters"}</button>
               </div>
             )}
 
             <div className="timeline-now">
               <span className="now-pulse" />
-              <div><small>NOW</small><strong>档案仍在生长</strong><p>下一次改动会继续出现在这里。</p></div>
+              <div><small>NOW</small><strong>{zh ? "档案仍在生长" : "Archive is maintained"}</strong><p>{zh ? "下一次改动会继续出现在这里。" : "The next update will appear here."}</p></div>
             </div>
           </div>
         </section>}
-        </> : <section className="hero-no-records" aria-label="暂无更新记录">
-          <strong>暂无更新记录</strong>
-          <button className="button ghost" onClick={() => setShowHeroPicker(true)}>切换英雄</button>
+        </> : <section className="hero-no-records" aria-label={zh ? "暂无更新记录" : "No update records"}>
+          <strong>{zh ? "暂无更新记录" : "No update records"}</strong>
+          <button className="button ghost" onClick={() => setShowHeroPicker(true)}>{zh ? "切换英雄" : "Change hero"}</button>
         </section>}
 
       </main>

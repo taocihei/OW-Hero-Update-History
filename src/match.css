@@ -82,7 +82,7 @@
 
 .owtv-region-tabs { min-height: 56px; padding: 10px 0; display: flex; align-items: center; gap: 7px; overflow-x: auto; scrollbar-width: thin; }
 .owtv-region-tabs button { min-height: 34px; padding: 0 12px; display: flex; align-items: center; gap: 7px; flex: 0 0 auto; color: #52666a; border: 1px solid #c9d5d4; background: #f7faf9; font-size: 14px; font-weight: 700; cursor: pointer; }
-.owtv-region-tabs button b { min-width: 21px; height: 21px; display: grid; place-items: center; color: #668084; background: #e5eeed; font-size: 11px; }
+.owtv-region-tabs button b { min-width: 21px; height: 21px; display: grid; place-items: center; color: #668084; background: #e5eeed; font-size: 12px; }
 .owtv-region-tabs button.active { color: white; border-color: #087f8b; background: #087f8b; }
 .owtv-region-tabs button.active b { color: #075c64; background: #bfe9ec; }
 

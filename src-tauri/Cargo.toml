@@ -1,6 +1,6 @@
 [package]
 name = "balance-atlas"
-version = "0.10.34"
+version = "0.10.35"
 description = "Overwatch hero update history and professional esports schedule"
 authors = ["OW Hero Update History"]
 edition = "2021"
@@ -24,4 +24,3 @@ futures = "0.3"
 csv = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-opener = "2"
-

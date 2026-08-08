@@ -498,8 +498,8 @@ main { overflow: hidden; }
 .overview-year-grid span:first-child { transform: none; }
 .overview-year-grid span:last-child { transform: translateX(-100%); }
 .overview-year-grid i { position: absolute; left: 50%; bottom: 17px; height: 179px; border-left: 1px dashed rgba(23,42,50,.12); }
-.overview-marker { --marker: var(--cyan); position: absolute; z-index: 4; top: calc(102px + (var(--lane) - 3) * 17px); width: 18px; height: 38px; padding: 0; transform: translate(-50%, -50%); border: 0; background: transparent; cursor: pointer; }
-.overview-marker i { position: absolute; left: 5px; top: 13px; width: 9px; height: 9px; border: 2px solid white; border-radius: 50%; background: var(--marker); box-shadow: 0 0 0 2px var(--marker); transition: transform .16s ease; }
+.overview-marker { --marker: var(--cyan); position: absolute; z-index: 4; top: calc(102px + (var(--lane) - 3) * 24px); width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 0; background: transparent; cursor: pointer; }
+.overview-marker i { position: absolute; left: 7px; top: 7px; width: 9px; height: 9px; border: 2px solid white; border-radius: 50%; background: var(--marker); box-shadow: 0 0 0 2px var(--marker); transition: transform .16s ease; }
 .overview-marker:hover i, .overview-marker:focus-visible i { transform: scale(1.55); }
 .overview-marker.selected i { transform: scale(1.7); box-shadow: 0 0 0 3px white, 0 0 0 5px var(--marker); }
 .overview-marker.nerf { --marker: var(--orange); }
@@ -618,7 +618,8 @@ main { overflow: hidden; }
   .hero-avatar-grid { grid-template-columns: repeat(3, minmax(76px, 1fr)); }
   .compact-history .overview-chart { height: 180px; }
   .compact-history .overview-axis { top: 84px; }
-  .compact-history .overview-marker { top: calc(84px + (var(--lane) - 3) * 13px); }
+  .compact-history .overview-marker { top: calc(84px + (var(--lane) - 3) * 20px); width: 18px; height: 18px; }
+  .compact-history .overview-marker i { left: 5px; top: 5px; }
 }
 
 /* Desktop readability pass: Chinese UI text never drops into micro-copy sizes. */
@@ -653,6 +654,13 @@ body { font-size: 16px; }
 .overview-year-grid span { font-size: 12px; }
 .roster-head p:last-child, .sync-state, .roster-count, .roster-error { font-size: 13px; }
 .roster-search input { font-size: 15px; }
+
+/* Accessibility regression: keep labels and counters readable at desktop scale. */
+.hero-switch-trigger em,
+.patch-region-selector button small,
+.track-summary-card > span,
+.track-filter b,
+.overview-metrics span small { font-size: 12px; }
 
 @media (max-width: 640px) {
   .hero-name-line h1 { font-size: 48px; }

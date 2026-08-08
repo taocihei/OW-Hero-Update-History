@@ -44,6 +44,7 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   weekday: "short",
 });
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+const dateFormatterEn = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "2-digit", weekday: "short" });
 
 const domesticStreamPlatforms = [
   { label: "B站", url: "https://live.bilibili.com/23612045" },
@@ -55,13 +56,16 @@ const domesticStreamPlatforms = [
   { label: "网易DD", url: "https://dd.163.com/room/0076" },
 ] as const;
 
-function formatSyncedAt(value: string | number) {
-  if (!value) return "等待首次同步";
+function formatSyncedAt(value: string | number, locale: UiLocale) {
+  if (!value) return locale === "zh" ? "等待首次同步" : "Waiting for first sync";
   const date = typeof value === "number" || /^\d+$/.test(String(value)) ? new Date(Number(value)) : new Date(value);
-  return Number.isNaN(date.getTime()) ? "已使用缓存" : `同步于 ${date.toLocaleString("zh-CN")}`;
+  return Number.isNaN(date.getTime())
+    ? (locale === "zh" ? "已使用缓存" : "Using cached data")
+    : `${locale === "zh" ? "同步于" : "Synced"} ${date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}`;
 }
 
-function regionName(region: string) {
+function regionName(region: string, locale: UiLocale = "zh") {
+  if (locale === "en") return region || "Global";
   const key = region.trim().toLowerCase();
   const names: Record<string, string> = {
     na: "北美",
@@ -85,7 +89,8 @@ function regionName(region: string) {
   return names[key] || region.toUpperCase();
 }
 
-function eventName(event: string) {
+function eventName(event: string, locale: UiLocale = "zh") {
+  if (locale === "en") return event;
   const names: Record<string, string> = {
     "Regular Season": "常规赛",
     "Online Qualifiers": "线上预选赛",
@@ -105,52 +110,56 @@ function matchBucket(match: EsportsMatch): Exclude<StatusFilter, "all"> {
   return "pending";
 }
 
-function statusMeta(match: EsportsMatch) {
-  if (match.status === "live") return { label: "进行中", className: "live" };
-  if (matchBucket(match) === "completed") return { label: "已结束", className: "completed" };
-  if (matchBucket(match) === "pending") return { label: "待补赛果", className: "pending" };
-  return { label: "即将开始", className: "upcoming" };
+function statusMeta(match: EsportsMatch, locale: UiLocale) {
+  const zh = locale === "zh";
+  if (match.status === "live") return { label: zh ? "进行中" : "Live", className: "live" };
+  if (matchBucket(match) === "completed") return { label: zh ? "已结束" : "Completed", className: "completed" };
+  if (matchBucket(match) === "pending") return { label: zh ? "待补赛果" : "Result pending", className: "pending" };
+  return { label: zh ? "即将开始" : "Upcoming", className: "upcoming" };
 }
 
 function isFutureMatch(match: EsportsMatch) {
   return matchBucket(match) === "upcoming";
 }
 
-function TeamLogo({ src, name }: { src: string; name: string }) {
+function TeamLogo({ src, name, locale = "zh" }: { src: string; name: string; locale?: UiLocale }) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const initials = name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase();
   const hue = Array.from(name).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 360;
   return (
-    <span className="pro-team-fallback" style={{ "--team-hue": hue } as React.CSSProperties} title={name} aria-label={`${name} 队标`}>
+    <span className="pro-team-fallback" style={{ "--team-hue": hue } as React.CSSProperties} title={name} aria-label={locale === "zh" ? `${name} 队标` : `${name} team logo`}>
       <Shield size={36} /><b>{initials}</b>
       {src && <img className={`pro-team-logo${imageLoaded ? " loaded" : ""}`} src={src} alt="" onLoad={() => setImageLoaded(true)} onError={() => setImageLoaded(false)} />}
     </span>
   );
 }
 
-function PlayerIntelCard({ intel }: { intel: PlayerIntel }) {
+function PlayerIntelCard({ intel, locale }: { intel: PlayerIntel; locale: UiLocale }) {
+  const zh = locale === "zh";
   return (
     <article className="asia-result">
       <div className="asia-identity">
         {intel.avatar ? <img src={intel.avatar} alt="" /> : <span>{intel.username.slice(0, 1).toUpperCase()}</span>}
-        <div><small>公开生涯资料</small><h3>{intel.username}</h3><p>{intel.title || intel.playerId}</p></div>
+        <div><small>{zh ? "公开生涯资料" : "Public career profile"}</small><h3>{intel.username}</h3><p>{intel.title || intel.playerId}</p></div>
       </div>
       <div className="asia-ranks">
         {intel.ranks.length ? intel.ranks.map((rank) => (
           <span key={rank.role}><b>{rank.role.toUpperCase()}</b>{rank.tier}{rank.division ? ` ${rank.division}` : ""}</span>
-        )) : <span><b>段位</b>未公开或未定级</span>}
+        )) : <span><b>{zh ? "段位" : "Rank"}</b>{zh ? "未公开或未定级" : "Private or unranked"}</span>}
       </div>
       <dl className="asia-metrics">
-        <div><dt>胜率</dt><dd>{intel.winrate !== undefined ? `${intel.winrate.toFixed(1)}%` : "—"}</dd></div>
+        <div><dt>{zh ? "胜率" : "Win rate"}</dt><dd>{intel.winrate !== undefined ? `${intel.winrate.toFixed(1)}%` : "—"}</dd></div>
         <div><dt>KDA</dt><dd>{intel.kda?.toFixed(2) ?? "—"}</dd></div>
-        <div><dt>场均伤害</dt><dd>{intel.average.damage ? numberFormatter.format(Math.round(intel.average.damage)) : "—"}</dd></div>
-        <div><dt>竞技场次</dt><dd>{intel.gamesPlayed ? numberFormatter.format(intel.gamesPlayed) : "—"}</dd></div>
+        <div><dt>{zh ? "场均伤害" : "Avg. damage"}</dt><dd>{intel.average.damage ? numberFormatter.format(Math.round(intel.average.damage)) : "—"}</dd></div>
+        <div><dt>{zh ? "竞技场次" : "Competitive games"}</dt><dd>{intel.gamesPlayed ? numberFormatter.format(intel.gamesPlayed) : "—"}</dd></div>
       </dl>
     </article>
   );
 }
 
 export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps) {
+  const zh = locale === "zh";
+  const activeDateFormatter = zh ? dateFormatter : dateFormatterEn;
   const initial = useMemo(loadEsportsSchedule, []);
   const [matches, setMatches] = useState(initial.matches);
   const [source, setSource] = useState(initial.source);
@@ -300,45 +309,45 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
       <section className="match-hero">
         <div>
           <p className="eyebrow">PRO ESPORTS / OFFICIAL SCHEDULE</p>
-          <h1>职业赛事中心</h1>
+          <h1>{zh ? "职业赛事中心" : "Professional Match Center"}</h1>
         </div>
         {section === "schedule" && <div className="official-source-card">
           <span><Radio size={22} /></span>
-          <div><small>当前数据源</small><strong>{source}</strong><p>{formatSyncedAt(syncedAt)}</p></div>
-          <button onClick={refreshSchedule} disabled={syncing} aria-label="同步官方职业赛程">
-            <RefreshCw className={syncing ? "spin" : ""} size={18} />同步
+          <div><small>{zh ? "当前数据源" : "Current data source"}</small><strong>{source}</strong><p>{formatSyncedAt(syncedAt, locale)}</p></div>
+          <button onClick={refreshSchedule} disabled={syncing} aria-label={zh ? "同步官方职业赛程" : "Sync official professional schedule"}>
+            <RefreshCw className={syncing ? "spin" : ""} size={18} />{zh ? "同步" : "Sync"}
           </button>
         </div>}
       </section>
 
-      <nav className="match-subnav" aria-label="职业比赛二级导航">
-        <button className={section === "schedule" ? "active" : ""} onClick={() => setSection("schedule")}><CalendarDays size={18} />职业赛程</button>
-        <button className={section === "teams" ? "active" : ""} onClick={() => setSection("teams")}><UsersRound size={18} />战队</button>
-        <button className={section === "players" ? "active" : ""} onClick={() => setSection("players")}><UserRoundSearch size={18} />选手</button>
-        <button className={section === "heroes" ? "active" : ""} onClick={() => setSection("heroes")}><Shield size={18} />英雄</button>
-        <button className={section === "player" ? "active" : ""} onClick={() => setSection("player")}><UserRoundSearch size={18} />亚服账号</button>
+      <nav className="match-subnav" aria-label={zh ? "职业比赛二级导航" : "Professional match navigation"}>
+        <button className={section === "schedule" ? "active" : ""} onClick={() => setSection("schedule")}><CalendarDays size={18} />{zh ? "职业赛程" : "Schedule"}</button>
+        <button className={section === "teams" ? "active" : ""} onClick={() => setSection("teams")}><UsersRound size={18} />{zh ? "战队" : "Teams"}</button>
+        <button className={section === "players" ? "active" : ""} onClick={() => setSection("players")}><UserRoundSearch size={18} />{zh ? "选手" : "Players"}</button>
+        <button className={section === "heroes" ? "active" : ""} onClick={() => setSection("heroes")}><Shield size={18} />{zh ? "英雄" : "Heroes"}</button>
+        <button className={section === "player" ? "active" : ""} onClick={() => setSection("player")}><UserRoundSearch size={18} />{zh ? "亚服账号" : "Asia Profile"}</button>
       </nav>
 
       {section === "schedule" && <>
-      <section className="pro-summary" aria-label="职业赛事总览">
-        <div><Trophy size={20} /><span>比赛总数<strong>{matches.length}</strong></span></div>
-        <div><CheckCircle2 size={20} /><span>已收录赛果<strong>{completedCount}</strong></span></div>
-        <div><CalendarDays size={20} /><span>即将开始<strong>{upcoming.length}</strong></span></div>
-        <div><Clock3 size={20} /><span>待补赛果<strong>{pendingCount}</strong></span></div>
-        <div><Radio size={20} /><span>赛事分类<strong>{eventCounts.length}</strong></span></div>
-        <div><UsersRound size={20} /><span>可搜索战队<strong>{teamCount}</strong></span></div>
-        <a href="https://esports.overwatch.com/en-us/schedule" target="_blank" rel="noreferrer">打开官方赛程 <ArrowUpRight size={17} /></a>
+      <section className="pro-summary" aria-label={zh ? "职业赛事总览" : "Professional match overview"}>
+        <div><Trophy size={20} /><span>{zh ? "比赛总数" : "Matches"}<strong>{matches.length}</strong></span></div>
+        <div><CheckCircle2 size={20} /><span>{zh ? "已收录赛果" : "Results"}<strong>{completedCount}</strong></span></div>
+        <div><CalendarDays size={20} /><span>{zh ? "即将开始" : "Upcoming"}<strong>{upcoming.length}</strong></span></div>
+        <div><Clock3 size={20} /><span>{zh ? "待补赛果" : "Pending"}<strong>{pendingCount}</strong></span></div>
+        <div><Radio size={20} /><span>{zh ? "赛事分类" : "Events"}<strong>{eventCounts.length}</strong></span></div>
+        <div><UsersRound size={20} /><span>{zh ? "可搜索战队" : "Teams"}<strong>{teamCount}</strong></span></div>
+        <a href="https://esports.overwatch.com/en-us/schedule" target="_blank" rel="noreferrer">{zh ? "打开官方赛程" : "Official schedule"} <ArrowUpRight size={17} /></a>
       </section>
 
-      {syncError && <p className="pro-sync-error"><AlertCircle size={17} />{syncError}，当前继续使用本地缓存。</p>}
+      {syncError && <p className="pro-sync-error"><AlertCircle size={17} />{syncError}{zh ? "，当前继续使用本地缓存。" : ". Continuing with the local cache."}</p>}
 
       {focus && (
         <section className="focus-match">
-          <div className="focus-copy"><p className="eyebrow">NEXT PROFESSIONAL MATCH</p><span>{focus.event} · {focus.stage || focus.phase || regionName(focus.region)}</span><h2>下一场职业比赛</h2><p><Clock3 size={17} />{dateFormatter.format(new Date(focus.datetime))} {timeFormatter.format(new Date(focus.datetime))}</p></div>
+          <div className="focus-copy"><p className="eyebrow">NEXT PROFESSIONAL MATCH</p><span>{eventName(focus.event, locale)} · {focus.stage || focus.phase || regionName(focus.region, locale)}</span><h2>{zh ? "下一场职业比赛" : "Next Professional Match"}</h2><p><Clock3 size={17} />{activeDateFormatter.format(new Date(focus.datetime))} {timeFormatter.format(new Date(focus.datetime))}</p></div>
           <div className="focus-teams">
-            <button onClick={() => setQuery(focus.team1)}><TeamLogo src={focus.team1Logo} name={focus.team1} /><strong>{focus.team1}</strong></button>
-            <div><span>VS</span><small>{regionName(focus.region)}</small></div>
-            <button onClick={() => setQuery(focus.team2)}><TeamLogo src={focus.team2Logo} name={focus.team2} /><strong>{focus.team2}</strong></button>
+            <button onClick={() => setQuery(focus.team1)}><TeamLogo src={focus.team1Logo} name={focus.team1} locale={locale} /><strong>{focus.team1}</strong></button>
+            <div><span>VS</span><small>{regionName(focus.region, locale)}</small></div>
+            <button onClick={() => setQuery(focus.team2)}><TeamLogo src={focus.team2Logo} name={focus.team2} locale={locale} /><strong>{focus.team2}</strong></button>
           </div>
           <div className="focus-streams">
             {domesticStreamPlatforms.map((platform) => <a className="domestic" href={platform.url} target="_blank" rel="noreferrer" key={platform.label}><Play size={14} />{platform.label}</a>)}
@@ -350,94 +359,94 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
 
       <section className="pro-schedule">
         <header className="owtv-index-head">
-          <div><p className="eyebrow">OWTV MATCHES</p><h2>比赛</h2><span>{matches.length} 场比赛 · {eventCounts.length} 项赛事</span></div>
+          <div><p className="eyebrow">OWTV MATCHES</p><h2>{zh ? "比赛" : "Matches"}</h2><span>{matches.length} {zh ? "场比赛" : "matches"} · {eventCounts.length} {zh ? "项赛事" : "events"}</span></div>
           <div className="owtv-head-actions">
-            <div className="owtv-view-switch" aria-label="切换比赛布局">
-              <button className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><LayoutGrid size={17} />卡片</button>
-              <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={17} />列表</button>
+            <div className="owtv-view-switch" aria-label={zh ? "切换比赛布局" : "Change match layout"}>
+              <button className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><LayoutGrid size={17} />{zh ? "卡片" : "Cards"}</button>
+              <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={17} />{zh ? "列表" : "List"}</button>
             </div>
-            <button className="balance-jump" onClick={onOpenBalance}><Trophy size={18} />英雄更新</button>
+            <button className="balance-jump" onClick={onOpenBalance}><Trophy size={18} />{zh ? "英雄更新" : "Hero Updates"}</button>
           </div>
         </header>
 
-        <nav className="owtv-status-tabs" aria-label="比赛状态">
-          {([['upcoming', `即将开始 ${upcoming.length}`], ['completed', `比赛结果 ${completedCount}`], ['all', `全部 ${matches.length}`], ['pending', `待核赛果 ${pendingCount}`]] as const).map(([value, label]) => <button key={value} className={status === value ? "active" : ""} onClick={() => { setStatus(value); setVisibleCount(24); }}>{label}</button>)}
+        <nav className="owtv-status-tabs" aria-label={zh ? "比赛状态" : "Match status"}>
+          {([['upcoming', `${zh ? "即将开始" : "Upcoming"} ${upcoming.length}`], ['completed', `${zh ? "比赛结果" : "Results"} ${completedCount}`], ['all', `${zh ? "全部" : "All"} ${matches.length}`], ['pending', `${zh ? "待核赛果" : "Pending"} ${pendingCount}`]] as const).map(([value, label]) => <button key={value} className={status === value ? "active" : ""} onClick={() => { setStatus(value); setVisibleCount(24); }}>{label}</button>)}
         </nav>
 
-        <nav className="owtv-region-tabs" aria-label="赛区">
-          <button className={region === "all" ? "active" : ""} onClick={() => { setRegion("all"); setVisibleCount(24); }}>全部赛区</button>
-          {regions.map((value) => <button key={value} className={region === value ? "active" : ""} onClick={() => { setRegion(value); setVisibleCount(24); }}>{regionName(value)}<b>{regionCounts.get(value) ?? 0}</b></button>)}
+        <nav className="owtv-region-tabs" aria-label={zh ? "赛区" : "Regions"}>
+          <button className={region === "all" ? "active" : ""} onClick={() => { setRegion("all"); setVisibleCount(24); }}>{zh ? "全部赛区" : "All regions"}</button>
+          {regions.map((value) => <button key={value} className={region === value ? "active" : ""} onClick={() => { setRegion(value); setVisibleCount(24); }}>{regionName(value, locale)}<b>{regionCounts.get(value) ?? 0}</b></button>)}
         </nav>
 
         <div className="owtv-filter-bar">
-          <label className="pro-search"><Search size={18} /><input value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(24); }} placeholder="搜索战队或赛事" aria-label="搜索职业比赛" /></label>
-          <label className="owtv-year-select"><span>年份</span><select value={yearFilter} onChange={(event) => { setYearFilter(event.target.value); setVisibleCount(24); }} aria-label="筛选比赛年份">
-            <option value="all">全部年份</option>
-            {years.map((year) => <option value={year} key={year}>{year} 年</option>)}
+          <label className="pro-search"><Search size={18} /><input value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(24); }} placeholder={zh ? "搜索战队或赛事" : "Search team or event"} aria-label={zh ? "搜索职业比赛" : "Search professional matches"} /></label>
+          <label className="owtv-year-select"><span>{zh ? "年份" : "Year"}</span><select value={yearFilter} onChange={(event) => { setYearFilter(event.target.value); setVisibleCount(24); }} aria-label={zh ? "筛选比赛年份" : "Filter match year"}>
+            <option value="all">{zh ? "全部年份" : "All years"}</option>
+            {years.map((year) => <option value={year} key={year}>{year}{zh ? " 年" : ""}</option>)}
           </select></label>
-          <label className="owtv-tournament-select"><span>赛事</span><select value={tournamentSelection} onChange={(event) => selectTournament(event.target.value)} aria-label="选择赛事">
-            <option value="all">全部赛事</option>
-            <optgroup label="赛事档案">
+          <label className="owtv-tournament-select"><span>{zh ? "赛事" : "Event"}</span><select value={tournamentSelection} onChange={(event) => selectTournament(event.target.value)} aria-label={zh ? "选择赛事" : "Select event"}>
+            <option value="all">{zh ? "全部赛事" : "All events"}</option>
+            <optgroup label={zh ? "赛事档案" : "Tournament archives"}>
               {competitionCatalog.filter((competition) => competitionCounts.has(competition.id)).map((competition) => <option value={`competition:${competition.id}`} key={competition.id}>{competition.name}（{competitionCounts.get(competition.id)}）</option>)}
             </optgroup>
-            <optgroup label="赛事阶段">
-              {eventCounts.map(([event, count]) => <option value={`event:${event}`} key={event}>{eventName(event)}（{count}）</option>)}
+            <optgroup label={zh ? "赛事阶段" : "Event stages"}>
+              {eventCounts.map(([event, count]) => <option value={`event:${event}`} key={event}>{eventName(event, locale)} ({count})</option>)}
             </optgroup>
           </select></label>
-          <strong className="owtv-result-count">{filtered.length}<small>场匹配</small></strong>
+          <strong className="owtv-result-count">{filtered.length}<small>{zh ? "场匹配" : "matches"}</small></strong>
         </div>
 
         {selectedCompetition && <CompetitionDetail competition={selectedCompetition} matches={matches} />}
 
-        {selectedMatch && matchDetailLoading && <div className="owtv-detail-loading" id="owtv-match-detail-loading"><LoaderCircle className="spin" size={26} /><strong>正在读取本地比赛数据</strong><span>地图、英雄禁用和选手统计会直接从 OWTV 本地数据库载入。</span></div>}
-        {selectedMatch && matchDetailError && <div className="owtv-detail-error"><AlertCircle size={22} /><div><strong>比赛详情读取失败</strong><span>{matchDetailError}</span></div><button onClick={closeMatchDetail}>返回比赛列表</button></div>}
+        {selectedMatch && matchDetailLoading && <div className="owtv-detail-loading" id="owtv-match-detail-loading"><LoaderCircle className="spin" size={26} /><strong>{zh ? "正在读取本地比赛数据" : "Loading local match data"}</strong><span>{zh ? "地图、英雄禁用和选手统计会直接从 OWTV 本地数据库载入。" : "Maps, hero bans, and player statistics load directly from the local OWTV database."}</span></div>}
+        {selectedMatch && matchDetailError && <div className="owtv-detail-error"><AlertCircle size={22} /><div><strong>{zh ? "比赛详情读取失败" : "Could not load match details"}</strong><span>{matchDetailError}</span></div><button onClick={closeMatchDetail}>{zh ? "返回比赛列表" : "Back to matches"}</button></div>}
         {selectedMatch && matchDetail && <OwtvMatchDetail detail={matchDetail} scheduleMatch={selectedMatch} onClose={closeMatchDetail} />}
 
         {!selectedMatch && <div className={`owtv-match-grid ${viewMode}`}>
           {filtered.slice(0, visibleCount).map((match) => {
-            const meta = statusMeta(match);
+            const meta = statusMeta(match, locale);
             return (
-              <article className="owtv-match-card" key={match.id} role="button" tabIndex={0} aria-label={`查看 ${match.team1} 对阵 ${match.team2} 的比赛详情`} onClick={() => void openMatchDetail(match)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") void openMatchDetail(match); }}>
+              <article className="owtv-match-card" key={match.id} role="button" tabIndex={0} aria-label={zh ? `查看 ${match.team1} 对阵 ${match.team2} 的比赛详情` : `View match details for ${match.team1} versus ${match.team2}`} onClick={() => void openMatchDetail(match)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openMatchDetail(match); } }}>
                 <header>
-                  <div><strong>{dateFormatter.format(new Date(match.datetime))}</strong><time>{timeFormatter.format(new Date(match.datetime))}</time></div>
+                  <div><strong>{activeDateFormatter.format(new Date(match.datetime))}</strong><time>{timeFormatter.format(new Date(match.datetime))}</time></div>
                   <em className={meta.className}>{meta.label}</em>
                 </header>
-                <div className="owtv-match-context"><strong>{eventName(match.event)}</strong><span>{[match.stage, match.phase].filter(Boolean).join(" · ") || regionName(match.region)}</span></div>
+                <div className="owtv-match-context"><strong>{eventName(match.event, locale)}</strong><span>{[match.stage, match.phase].filter(Boolean).join(" · ") || regionName(match.region, locale)}</span></div>
                 <div className="owtv-team-row">
-                  <button tabIndex={-1}><TeamLogo src={match.team1Logo} name={match.team1} /><span>{match.team1}</span></button>
+                  <button tabIndex={-1}><TeamLogo src={match.team1Logo} name={match.team1} locale={locale} /><span>{match.team1}</span></button>
                   <b>{match.status === "completed" ? match.score1 ?? 0 : "—"}</b>
                 </div>
                 <div className="owtv-team-row">
-                  <button tabIndex={-1}><TeamLogo src={match.team2Logo} name={match.team2} /><span>{match.team2}</span></button>
+                  <button tabIndex={-1}><TeamLogo src={match.team2Logo} name={match.team2} locale={locale} /><span>{match.team2}</span></button>
                   <b>{match.status === "completed" ? match.score2 ?? 0 : "—"}</b>
                 </div>
-                <footer><span>{regionName(match.region)}</span><nav>
-                  {match.bilibili && <a onClick={(event) => event.stopPropagation()} className="bilibili" href={match.bilibili} title="B站中文回放" target="_blank" rel="noreferrer"><Play size={15} />B站</a>}
-                  {match.owtv && <a onClick={(event) => event.stopPropagation()} className="owtv" href={match.owtv} title="OWTV 逐场数据" target="_blank" rel="noreferrer"><Activity size={15} />数据</a>}
+                <footer><span>{regionName(match.region, locale)}</span><nav aria-label={zh ? "比赛链接" : "Match links"}>
+                  {match.bilibili && <a onClick={(event) => event.stopPropagation()} className="bilibili" href={match.bilibili} title={zh ? "B站中文回放" : "Bilibili replay"} target="_blank" rel="noreferrer"><Play size={15} />{zh ? "B站" : "Bilibili"}</a>}
+                  {match.owtv && <a onClick={(event) => event.stopPropagation()} className="owtv" href={match.owtv} title={zh ? "OWTV 逐场数据" : "OWTV match data"} target="_blank" rel="noreferrer"><Activity size={15} />{zh ? "数据" : "Data"}</a>}
                   {match.youtube && <a onClick={(event) => event.stopPropagation()} href={match.youtube} title="YouTube 直播或回放" target="_blank" rel="noreferrer"><Play size={15} />YouTube</a>}
                   {match.twitch && <a onClick={(event) => event.stopPropagation()} href={match.twitch} title="Twitch 直播或回放" target="_blank" rel="noreferrer"><Radio size={15} />Twitch</a>}
-                  {!match.bilibili && !match.owtv && !match.youtube && !match.twitch && <small>暂无链接</small>}
+                  {!match.bilibili && !match.owtv && !match.youtube && !match.twitch && <small>{zh ? "暂无链接" : "No links"}</small>}
                 </nav></footer>
               </article>
             );
           })}
-          {!filtered.length && <div className="pro-empty"><Search size={27} /><h3>没有匹配的职业比赛</h3><p>请清除关键词或切换赛区与比赛状态。</p></div>}
+          {!filtered.length && <div className="pro-empty"><Search size={27} /><h3>{zh ? "没有匹配的职业比赛" : "No matching professional matches"}</h3><p>{zh ? "请清除关键词或切换赛区与比赛状态。" : "Clear the search or change region and status filters."}</p></div>}
         </div>}
-        {!selectedMatch && visibleCount < filtered.length && <button className="show-more" onClick={() => setVisibleCount((count) => count + 24)}>再显示 24 场</button>}
+        {!selectedMatch && visibleCount < filtered.length && <button className="show-more" onClick={() => setVisibleCount((count) => count + 24)}>{zh ? "再显示 24 场" : "Show 24 more"}</button>}
       </section>
       </>}
 
       {(section === "teams" || section === "players" || section === "heroes") && <EsportsAnalytics data={analytics} mode={section} matches={matches} locale={locale} onModeChange={setSection} />}
 
       {section === "player" && <section className="asia-player-section">
-        <div className="asia-copy"><p className="eyebrow">PLAYER LOOKUP</p><h2>亚服账号查询</h2></div>
+        <div className="asia-copy"><p className="eyebrow">PLAYER LOOKUP</p><h2>{zh ? "亚服账号查询" : "Asia Profile Lookup"}</h2></div>
         <form className="asia-query" onSubmit={queryPlayer}>
           <label htmlFor="asia-battletag"><UserRoundSearch size={18} />BattleTag</label>
-          <div><input id="asia-battletag" value={battleTag} onChange={(event) => setBattleTag(event.target.value)} placeholder="玩家名#1234" /><button disabled={intelLoading || !battleTag.trim()}>{intelLoading ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}查询公开资料</button></div>
+          <div><input id="asia-battletag" value={battleTag} onChange={(event) => setBattleTag(event.target.value)} placeholder={zh ? "玩家名#1234" : "Player#1234"} /><button disabled={intelLoading || !battleTag.trim()}>{intelLoading ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}{zh ? "查询公开资料" : "Search public profile"}</button></div>
           {intelError && <p className="asia-error"><AlertCircle size={16} />{intelError}</p>}
         </form>
-        {intel && <PlayerIntelCard intel={intel} />}
-        {!intel && !intelLoading && <div className="asia-result-empty"><span>查询结果</span><strong>—</strong></div>}
+        {intel && <PlayerIntelCard intel={intel} locale={locale} />}
+        {!intel && !intelLoading && <div className="asia-result-empty"><span>{zh ? "查询结果" : "Search result"}</span><strong>—</strong></div>}
       </section>}
     </main>
   );

@@ -10,6 +10,7 @@ import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -249,6 +250,27 @@ class Store:
             elif "mapIndex" in row and "team1Score" in row and "team2Score" in row: match_maps[rid]=row
             elif "damageDealt" in row and "healingDone" in row and "matchMap" in row: stats[rid]=row
             elif "mode" in row and "name" in row and "gameId" in row: maps[rid]=row
+        # A match page can embed another same-team fixture in its surrounding
+        # Next.js payload.  Accept statistics close to this fixture's scheduled
+        # time, then keep only map objects referenced by those accepted rows.
+        # Without this guard a later page could move global match-map ids to the
+        # wrong series and leave player statistics orphaned.
+        expected_start = self.db.execute("SELECT start_date FROM matches WHERE id=?", (match_id,)).fetchone()
+        expected_text = expected_start[0] if expected_start else None
+        if expected_text and stats:
+            try:
+                expected_dt = datetime.fromisoformat(str(expected_text).replace("Z", "+00:00"))
+                stats = {
+                    rid: row for rid, row in stats.items()
+                    if not row.get("matchStartDate")
+                    or abs((datetime.fromisoformat(str(row["matchStartDate"]).replace("Z", "+00:00")) - expected_dt).total_seconds()) <= 12 * 3600
+                }
+            except (TypeError, ValueError):
+                pass
+        referenced_match_maps = {relation_id(row.get("matchMap")) for row in stats.values()}
+        referenced_match_maps.discard(None)
+        if referenced_match_maps:
+            match_maps = {rid: row for rid, row in match_maps.items() if rid in referenced_match_maps}
         for row in teams.values(): self.upsert_team(row)
         for row in players.values():
             image, _ = image_info(row)
@@ -258,11 +280,11 @@ class Store:
         for row in maps.values():
             image,_=image_info(row); self.db.execute("INSERT INTO map_catalog(id,name,mode,image_url,local_image_path,raw_json) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,mode=excluded.mode,image_url=excluded.image_url,raw_json=excluded.raw_json",(row["id"],row.get("name"),row.get("mode"),image,None,compact(row)))
         for row in match_maps.values():
-            map_id=relation_id(row.get("map")); self.db.execute("""INSERT INTO match_maps(id,match_id,map_id,slug,map_index,team1_score,team2_score,result_type,complete,map_picker,map_picker_type,team1_ban,team2_ban,ban_order_choice,first_ban,one_vs_one_winner,replay_code,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET match_id=excluded.match_id,map_id=excluded.map_id,team1_score=excluded.team1_score,team2_score=excluded.team2_score,result_type=excluded.result_type,complete=excluded.complete,replay_code=excluded.replay_code,raw_json=excluded.raw_json""",(row["id"],match_id,map_id,row.get("slug"),row.get("mapIndex"),row.get("team1Score"),row.get("team2Score"),row.get("resultType"),int(bool(row.get("complete"))),relation_id(row.get("mapPicker")),row.get("mapPickerType"),relation_id(row.get("team1Ban")),relation_id(row.get("team2Ban")),relation_id(row.get("banOrderChoice")),relation_id(row.get("firstBan")),relation_id(row.get("oneVsOneWinner")),row.get("replayCode"),compact(row)))
+            map_id=relation_id(row.get("map")); self.db.execute("""INSERT INTO match_maps(id,match_id,map_id,slug,map_index,team1_score,team2_score,result_type,complete,map_picker,map_picker_type,team1_ban,team2_ban,ban_order_choice,first_ban,one_vs_one_winner,replay_code,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET match_id=excluded.match_id,map_id=excluded.map_id,slug=excluded.slug,map_index=excluded.map_index,team1_score=excluded.team1_score,team2_score=excluded.team2_score,result_type=excluded.result_type,complete=excluded.complete,map_picker=excluded.map_picker,map_picker_type=excluded.map_picker_type,team1_ban=excluded.team1_ban,team2_ban=excluded.team2_ban,ban_order_choice=excluded.ban_order_choice,first_ban=excluded.first_ban,one_vs_one_winner=excluded.one_vs_one_winner,replay_code=excluded.replay_code,raw_json=excluded.raw_json""",(row["id"],match_id,map_id,row.get("slug"),row.get("mapIndex"),row.get("team1Score"),row.get("team2Score"),row.get("resultType"),int(bool(row.get("complete"))),relation_id(row.get("mapPicker")),row.get("mapPickerType"),relation_id(row.get("team1Ban")),relation_id(row.get("team2Ban")),relation_id(row.get("banOrderChoice")),relation_id(row.get("firstBan")),relation_id(row.get("oneVsOneWinner")),row.get("replayCode"),compact(row)))
         for row in stats.values():
             mm=relation_id(row.get("matchMap")); pid=relation_id(row.get("person")); team=relation_id(row.get("team"))
             if not mm or not pid: continue
-            self.db.execute("""INSERT INTO player_map_stats(id,match_id,match_map_id,team_id,player_id,role,eliminations,assists,deaths,damage_dealt,healing_done,damage_mitigated,fantasy_score,objective_time,solo_kills,environmental_kills,multi_kills,final_blows,match_start_date,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eliminations=excluded.eliminations,assists=excluded.assists,deaths=excluded.deaths,damage_dealt=excluded.damage_dealt,healing_done=excluded.healing_done,damage_mitigated=excluded.damage_mitigated,fantasy_score=excluded.fantasy_score,raw_json=excluded.raw_json""",(row["id"],match_id,mm,team,pid,row.get("role"),row.get("eliminations"),row.get("assists"),row.get("deaths"),row.get("damageDealt"),row.get("healingDone"),row.get("damageMitigated"),row.get("cachedFantasyScore"),row.get("faceitObjectiveTime"),row.get("faceitSoloKills"),row.get("faceitEnvironmentalKills"),row.get("faceitMultiKills"),row.get("faceitFinalBlows"),row.get("matchStartDate"),compact(row)))
+            self.db.execute("""INSERT INTO player_map_stats(id,match_id,match_map_id,team_id,player_id,role,eliminations,assists,deaths,damage_dealt,healing_done,damage_mitigated,fantasy_score,objective_time,solo_kills,environmental_kills,multi_kills,final_blows,match_start_date,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET match_id=excluded.match_id,match_map_id=excluded.match_map_id,team_id=excluded.team_id,player_id=excluded.player_id,role=excluded.role,eliminations=excluded.eliminations,assists=excluded.assists,deaths=excluded.deaths,damage_dealt=excluded.damage_dealt,healing_done=excluded.healing_done,damage_mitigated=excluded.damage_mitigated,fantasy_score=excluded.fantasy_score,objective_time=excluded.objective_time,solo_kills=excluded.solo_kills,environmental_kills=excluded.environmental_kills,multi_kills=excluded.multi_kills,final_blows=excluded.final_blows,match_start_date=excluded.match_start_date,raw_json=excluded.raw_json""",(row["id"],match_id,mm,team,pid,row.get("role"),row.get("eliminations"),row.get("assists"),row.get("deaths"),row.get("damageDealt"),row.get("healingDone"),row.get("damageMitigated"),row.get("cachedFantasyScore"),row.get("faceitObjectiveTime"),row.get("faceitSoloKills"),row.get("faceitEnvironmentalKills"),row.get("faceitMultiKills"),row.get("faceitFinalBlows"),row.get("matchStartDate"),compact(row)))
             if team: self.db.execute("INSERT INTO player_teams VALUES(?,?,?,?,?) ON CONFLICT(player_id,team_id,source) DO UPDATE SET last_seen=excluded.last_seen",(pid,team,"matchStats",row.get("matchStartDate"),row.get("matchStartDate")))
         sha=hashlib.sha256(html.encode()).hexdigest(); self.db.execute("UPDATE matches SET detail_fetched_at=?,detail_sha256=? WHERE id=?",(utcnow(),sha,match_id))
         return {"players":len(players),"maps":len(match_maps),"stats":len(stats)}
@@ -294,20 +316,48 @@ def export_catalog(db: sqlite3.Connection, output: Path) -> None:
     player_rows=db.execute("""
         SELECT p.id,p.name,p.alias,p.job,p.role,p.region,p.nationality,p.image_url,
                p.local_image_path,p.website_url,p.liquipedia_url,p.twitter_url,p.youtube_url,
-               p.updated_at,GROUP_CONCAT(DISTINCT t.name)
+               p.updated_at,MAX(pt.last_seen),GROUP_CONCAT(DISTINCT t.name)
         FROM players p
         LEFT JOIN player_teams pt ON pt.player_id=p.id
         LEFT JOIN teams t ON t.id=pt.team_id
         GROUP BY p.id
         ORDER BY p.id
     """)
-    players=[]
+    raw_players=[]
     for row in player_rows:
-        item=dict(zip(("id","name","alias","job","role","region","nationality","imageUrl","localImagePath","websiteUrl","liquipediaUrl","twitterUrl","youtubeUrl","updatedAt","teamNames"),row))
+        item=dict(zip(("id","name","alias","job","role","region","nationality","imageUrl","localImagePath","websiteUrl","liquipediaUrl","twitterUrl","youtubeUrl","updatedAt","lastSeen","teamNames"),row))
         item["teamNames"]=[name for name in (item["teamNames"] or "").split(",") if name]
-        players.append(item)
+        raw_players.append(item)
+    # OWTV occasionally creates a new numeric person id for an existing alias
+    # between seasons.  Export one searchable player while preserving every
+    # source id and all historical teams; otherwise the UI silently selects
+    # only one half of Checkmate/Edison/Soae's career.
+    def player_key(item: dict[str, Any]) -> str:
+        value = str(item.get("alias") or item.get("name") or "")
+        plain = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+        return re.sub(r"[^a-z0-9]", "", plain.lower()) or f"id:{item['id']}"
+    grouped_players: dict[str, list[dict[str, Any]]] = {}
+    for item in raw_players:
+        grouped_players.setdefault(player_key(item), []).append(item)
+    players=[]
+    for variants in grouped_players.values():
+        representative = max(
+            variants,
+            key=lambda item: (
+                str(item.get("lastSeen") or ""),
+                int(bool(item.get("name") and item.get("name") != item.get("alias"))),
+                str(item.get("updatedAt") or ""),
+            ),
+        )
+        merged = dict(representative)
+        merged["sourceIds"] = sorted({int(item["id"]) for item in variants})
+        merged["teamNames"] = sorted({name for item in variants for name in item["teamNames"]})
+        players.append(merged)
+    players.sort(key=lambda item: str(item.get("alias") or item.get("name") or "").casefold())
     tournaments=[dict(zip(("id","slug","name","tier","startDate","endDate","format","location","countryCode","imageUrl","localImagePath","sourceUrl"),row)) for row in db.execute("SELECT id,slug,name,tier,start_date,end_date,format,location,country_code,image_url,local_image_path,source_url FROM tournaments ORDER BY COALESCE(start_date,'') DESC,id DESC")]
     counts={table:db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("tournaments","matches","teams","players","match_maps","player_map_stats")}
+    counts["raw_players"] = counts["players"]
+    counts["players"] = len(players)
     payload={"generatedAt":utcnow(),"source":"OWTV local SQLite archive","counts":counts,"teamCount":len(teams),"playerCount":len(players),"tournamentCount":len(tournaments),"teams":teams,"players":players,"tournaments":tournaments}
     output.write_text(json.dumps(payload,ensure_ascii=False,separators=(",",":")),encoding="utf-8")
 

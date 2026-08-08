@@ -233,7 +233,11 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
     });
   }, [scopedTeamUsage, pseudoTeams]);
   const players = useMemo(() => {
-    const ordered: string[] = [...owtvTeamCatalog.players.map((item) => item.alias || item.name).filter((name): name is string => Boolean(name)), ...scopedPlayerUsage.map((row) => row.player_name)];
+    // Prefer the canonical spelling from the statistics rows.  OWTV's roster
+    // catalog occasionally stores an alias with different casing (for example
+    // `guxue`), while hero usage stores `Guxue`; keeping the catalog spelling
+    // made the exact player filter return an empty hero pool.
+    const ordered: string[] = [...scopedPlayerUsage.map((row) => row.player_name), ...owtvTeamCatalog.players.map((item) => item.alias || item.name).filter((name): name is string => Boolean(name))];
     const seen = new Set<string>();
     return ordered.filter((name) => {
       const key = normalize(name);
@@ -306,7 +310,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
   }, [scopedPlayerUsage, scopedTournamentPlayerUsage, team, tournament]);
   const playerRows = useMemo(() => {
     const grouped = new Map<string, PlayerHeroUsage>();
-    for (const row of scopedPlayerUsage.filter((item) => item.player_name === player)) {
+    for (const row of scopedPlayerUsage.filter((item) => normalize(item.player_name) === normalize(player))) {
       const key = normalize(row.hero_name);
       const current = grouped.get(key);
       if (!current) {
@@ -347,7 +351,16 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
     return scopedPlayerUsage.filter((row) => row.hero_name === hero && eligibleTeams.has(row.team_name)).sort((a, b) => n(b.usage_count) - n(a.usage_count));
   }, [scopedPlayerUsage, scopedTournamentPlayerUsage, hero, heroTeamRows, tournament]);
   const heroTournamentRows = useMemo(() => scopedTournamentUsage.filter((row) => row.hero_name === hero && tournamentInScope(row.tournament_sheet, tournament)).sort((a, b) => n(b.usage_count) - n(a.usage_count)), [scopedTournamentUsage, hero, tournament]);
-  const heroMapRows = useMemo(() => scopedMapUsage.filter((row) => row.hero_name === hero).sort((a, b) => n(b.usage_count) - n(a.usage_count)), [scopedMapUsage, hero]);
+  const heroMapRows = useMemo(() => {
+    const grouped = new Map<string, (typeof scopedMapUsage)[number]>();
+    for (const row of scopedMapUsage.filter((item) => item.hero_name === hero)) {
+      const key = normalize(row.map_name);
+      const current = grouped.get(key);
+      if (current) current.usage_count = String(n(current.usage_count) + n(row.usage_count));
+      else grouped.set(key, { ...row });
+    }
+    return Array.from(grouped.values()).sort((a, b) => n(b.usage_count) - n(a.usage_count));
+  }, [scopedMapUsage, hero]);
   const heroMatchRows = useMemo(() => {
     const grouped = new Map<string, (typeof heroTournamentMatches)[number]>();
     for (const row of heroTournamentMatches) {
