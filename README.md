@@ -24,9 +24,9 @@
 - 2025 社区阵容会明确标注证据选手和地图；OWTV 链接仅用于核对对阵与地图，不将英雄禁用图标当作出场英雄。
 - 历史档案保存在本地，启动时不重复下载完整数据。
 
-## 中国赛区跨区冠军小账本
+## 中国赛区国际赛事成绩
 
-统计截至 2026-08-09。为了避免把“国家队”“中国城市席位”和“中国选手班底”混成同一个概念，这里分开计算：
+统计截止：2026-08-09
 
 | 年份 | 中国赛区/中国阵容的国际赛情况 | 当年最好成绩 | 国际冠军 |
 | --- | --- | --- | --- |
@@ -38,12 +38,14 @@
 
 逐年结果参考：[LGD.OA 2024 赛绩](https://liquipedia.net/overwatch/Once_Again)、[Weibo Gaming 2025 国际赛回顾](https://owtv.gg/news/weibo-gaming-new-improved-and-ready-to-take-on-the-world)、[2026 季中冠军赛](https://owtv.gg/tournaments)。
 
-- **中国国家队：0 冠、3 亚。** 世界杯在 2018、2019、2023 三次获得亚军；2026 世界杯尚未决出冠军。
-- **最高级别全年总冠军：1 次。** 上海龙之队获得 2021 守望先锋联赛总冠军；这是中国城市席位的冠军，但夺冠阵容并非中国选手班底。
-- **按官方跨赛区/洲际赛事、并计入中国城市席位：8 次冠军。** 上海龙之队 6 次（5 次阶段赛/锦标赛冠军加 2021 全年总冠军）、广州冲锋 1 次、Team CC 1 次。
-- **只看中国选手为核心的官方跨区冠军：1 次。** Team CC 获得 2020 挑战者系列赛亚洲 Gauntlet 冠军。
+| 统计项 | 成绩 |
+| --- | --- |
+| 中国国家队世界杯 | 0 冠、3 亚（2018、2019、2023） |
+| 中国城市席位全年总冠军 | 上海龙之队，2021 守望先锋联赛总冠军 |
+| 中国城市席位跨赛区/洲际冠军 | 8 次：上海龙之队 6 次、广州冲锋 1 次、Team CC 1 次 |
+| 中国选手核心阵容跨区冠军 | Team CC，2020 挑战者系列赛亚洲 Gauntlet 冠军 |
 
-这个口径不计纯中国区赛事，也不把 Nexus Cup、NeXT 等商业邀请赛混入官方主赛道。参考：[中国队与 2026 世界杯](https://esports.overwatch.com/en-us/news/overwatch-world-cup-2026)、[上海龙之队赛绩](https://liquipedia.net/overwatch/Shanghai_Dragons)、[Team CC 赛绩](https://liquipedia.net/overwatch/Team_CC)、[2020 守望先锋联赛](https://liquipedia.net/overwatch/Overwatch_League/2020)。
+参考：[中国队与 2026 世界杯](https://esports.overwatch.com/en-us/news/overwatch-world-cup-2026)、[上海龙之队赛绩](https://liquipedia.net/overwatch/Shanghai_Dragons)、[Team CC 赛绩](https://liquipedia.net/overwatch/Team_CC)、[2020 守望先锋联赛](https://liquipedia.net/overwatch/Overwatch_League/2020)。
 
 ## 开发
 
