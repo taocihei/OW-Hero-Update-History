@@ -544,7 +544,7 @@ export default function EsportsAnalytics({ data, mode, matches, locale, onModeCh
         <span><Swords size={17} /><b>{number.format(owtvTeamCatalog.counts.matches)}</b> {locale === "zh" ? "\u573a\u6bd4\u8d5b" : "matches"}</span>
         <span><UsersRound size={17} /><b>{owtvTeamCatalog.counts.teams}</b> {locale === "zh" ? "\u652f\u6218\u961f" : "teams"}</span>
         <span><UserRound size={17} /><b>{number.format(owtvTeamCatalog.counts.players)}</b> {locale === "zh" ? "\u4f4d\u9009\u624b" : "players"}</span>
-        <span title={data.history.coverage}><HardDrive size={17} />{locale === "zh" ? "\u672c\u5730\u6863\u6848 2018\u20142026" : "Local archive 2018\u20142026"}</span>
+        <span title={data.history.coverage}><HardDrive size={17} />{locale === "zh" ? "\u672c\u5730\u6863\u6848 2018\u20142023 / 2025\u20142026" : "Local archive 2018\u20142023 / 2025\u20142026"}</span>
         <a className="output-source" href="https://owtv.gg/" target="_blank" rel="noreferrer"><Activity size={17} />{locale === "zh" ? "\u9010\u573a\u6570\u636e\uff1a2025\u20142026" : "Match data: 2025\u20142026"}</a>
       </div>
     </header>
