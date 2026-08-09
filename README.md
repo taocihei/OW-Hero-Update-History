@@ -34,7 +34,7 @@
 | 2025 | OWCS 中国赛区正式回归；Weibo Gaming 参加三项国际赛 | Champions Clash 第 4 名；年终总决赛第 5—6 名 | 0 |
 | 2026（截至 8 月 9 日） | Weibo Gaming 参加 Champions Clash 与季中冠军赛；世界杯尚未结束 | 季中冠军赛第 4 名 | 0 |
 
-> 数据覆盖按实际写明：逐场 OWTV 比赛与地图统计目前为 **2025—2026**；历史 Stats Lab 为 **2018—2023**。**2024 在项目说明中只记录赛事结果，软件数据库尚无完整逐场英雄/伤害档案，不把它伪装成连续数据。**
+**数据范围：** Stats Lab（2018—2023）；赛事结果（2024）；OWTV 逐场比赛、地图与选手统计（2025—2026）。
 
 逐年结果参考：[LGD.OA 2024 赛绩](https://liquipedia.net/overwatch/Once_Again)、[Weibo Gaming 2025 国际赛回顾](https://owtv.gg/news/weibo-gaming-new-improved-and-ready-to-take-on-the-world)、[2026 季中冠军赛](https://owtv.gg/tournaments)。
 
