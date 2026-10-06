@@ -23,10 +23,10 @@ from bs4 import BeautifulSoup
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "owtv" / "owtv.sqlite3"
 BASE = "https://owtv.gg"
-UA = "OWHeroUpdateHistory/0.10.18 (+local incremental archive)"
-TOURNAMENT_ACTION = "78554873a769addd9eec0766a439ca0b88acc3e869"
-RECENT_ACTION = "70e4e56ca4fe89764c1b1f4546ff52dbe9e424de60"
-UPCOMING_ACTION = "70a3334a29ee008618bf7916ce528009e00e71853e"
+UA = "OWHeroUpdateHistory/0.10.38 (+local incremental archive)"
+TOURNAMENT_ACTION = "784f46d4215fca94da39dec5ecc9970ef7e1ff9d93"
+RECENT_ACTION = "70cb4dc35491c9f855783bd3950a3e01097c981c0e"
+UPCOMING_ACTION = "704104fadabcd9fb123f5403bf4e093bc2b782354c"
 THREAD = threading.local()
 
 
@@ -52,6 +52,8 @@ def request(method: str, url: str, **kwargs: Any) -> requests.Response:
             return response
         except Exception as exc:
             last = exc
+            if isinstance(exc, requests.HTTPError) and exc.response is not None and exc.response.status_code in (400, 401, 403, 404, 410):
+                break
             time.sleep(min(12, (2**attempt) * 0.35) + random.random() * 0.25)
     raise RuntimeError(f"request failed: {method} {url}: {last}")
 
@@ -113,6 +115,7 @@ def action(action_id: str, body: list[Any], referer: str) -> Any:
 
 def flight_objects(html: str) -> list[Any]:
     result: list[Any] = []
+    chunks: list[str] = []
     for script in BeautifulSoup(html, "html.parser").find_all("script"):
         match = re.fullmatch(r"self\.__next_f\.push\((.*)\)", script.string or "", re.S)
         if not match:
@@ -123,14 +126,39 @@ def flight_objects(html: str) -> list[Any]:
             continue
         if len(flight) < 2 or not isinstance(flight[1], str):
             continue
-        for line in flight[1].splitlines():
-            if ":" not in line:
-                continue
-            try:
-                result.append(json.loads(line.split(":", 1)[1]))
-            except json.JSONDecodeError:
-                pass
+        chunks.append(flight[1])
+    # Next.js can split one JSON record across multiple script tags. Parsing
+    # each tag independently silently drops those maps/player-stat records.
+    for line in "".join(chunks).splitlines():
+        if ":" not in line:
+            continue
+        try:
+            result.append(json.loads(line.split(":", 1)[1]))
+        except json.JSONDecodeError:
+            pass
     return result
+
+
+def index_rows(action_id: str, referer: str, variant: str | None = None) -> list[dict[str, Any]]:
+    rows: dict[int, dict[str, Any]] = {}
+    page = 1
+    while True:
+        body: list[Any] = [page, 100, None]
+        if variant is not None:
+            body.append(variant)
+        result = action(action_id, body, referer)
+        if not isinstance(result, dict) or not isinstance(result.get("rows"), list) or not isinstance(result.get("total"), int):
+            raise ValueError(f"invalid OWTV index response: {referer}, page {page}")
+        before = len(rows)
+        for row in result["rows"]:
+            rid = relation_id(row.get("id")) if isinstance(row, dict) else None
+            if rid is not None:
+                rows[rid] = {**row, "id": rid}
+        if len(rows) >= result["total"]:
+            return list(rows.values())
+        if len(rows) == before:
+            raise ValueError(f"incomplete OWTV index: {referer}, {len(rows)}/{result['total']}")
+        page += 1
 
 
 def walk(value: Any) -> Iterable[Any]:
@@ -225,6 +253,8 @@ class Store:
 
     def upsert_match(self, row: dict[str, Any]) -> None:
         if not isinstance(row.get("id"), int) or not row.get("slug"): return
+        row = {**row, "slug": str(row["slug"]).strip()}
+        if not row["slug"]: return
         match_id = row["id"]
         tournament = row.get("tournament")
         if isinstance(tournament, dict): self.upsert_tournament(tournament)
@@ -241,6 +271,13 @@ class Store:
     def ingest_detail(self, match_id: int, html: str) -> dict[str,int]:
         roots = flight_objects(html)
         objects = [item for root in roots for item in walk(root) if isinstance(item,dict)]
+        # Scope to the requested match, not the sidebar's other fixtures. A map
+        # is valid even when OWTV has not published any player statistics for it.
+        target = next((item for item in objects if item.get("id") == match_id
+                       and "team1" in item and "team2" in item
+                       and isinstance(item.get("maps"), (dict, list))), None)
+        if target is not None:
+            objects = [item for item in walk(target) if isinstance(item, dict)]
         teams: dict[int,dict[str,Any]] = {}; players: dict[int,dict[str,Any]] = {}; maps: dict[int,dict[str,Any]] = {}; match_maps: dict[int,dict[str,Any]] = {}; stats: dict[int,dict[str,Any]] = {}
         for row in objects:
             rid = row.get("id")
@@ -250,14 +287,9 @@ class Store:
             elif "mapIndex" in row and "team1Score" in row and "team2Score" in row: match_maps[rid]=row
             elif "damageDealt" in row and "healingDone" in row and "matchMap" in row: stats[rid]=row
             elif "mode" in row and "name" in row and "gameId" in row: maps[rid]=row
-        # A match page can embed another same-team fixture in its surrounding
-        # Next.js payload.  Accept statistics close to this fixture's scheduled
-        # time, then keep only map objects referenced by those accepted rows.
-        # Without this guard a later page could move global match-map ids to the
-        # wrong series and leave player statistics orphaned.
-        expected_start = self.db.execute("SELECT start_date FROM matches WHERE id=?", (match_id,)).fetchone()
+        expected_start = self.db.execute("SELECT start_date,slug,team1_id,team2_id FROM matches WHERE id=?", (match_id,)).fetchone()
         expected_text = expected_start[0] if expected_start else None
-        if expected_text and stats:
+        if target is None and expected_text and stats:
             try:
                 expected_dt = datetime.fromisoformat(str(expected_text).replace("Z", "+00:00"))
                 stats = {
@@ -267,10 +299,26 @@ class Store:
                 }
             except (TypeError, ValueError):
                 pass
-        referenced_match_maps = {relation_id(row.get("matchMap")) for row in stats.values()}
-        referenced_match_maps.discard(None)
-        if referenced_match_maps:
-            match_maps = {rid: row for rid, row in match_maps.items() if rid in referenced_match_maps}
+        if target is None:
+            # Legacy payloads lack the enclosing match object. Require an
+            # explicit relation, matching slug, or an already verified owner.
+            # A nearby timestamp alone does not identify a match.
+            prefix = str(expected_start[1]).strip() + "-" if expected_start else ""
+            owned = {row[0] for row in self.db.execute("SELECT id FROM match_maps WHERE match_id=?", (match_id,))}
+            match_maps = {rid: row for rid, row in match_maps.items()
+                          if relation_id(row.get("match")) == match_id
+                          or rid in owned
+                          or (prefix and str(row.get("slug") or "").startswith(prefix))}
+            if not match_maps:
+                raise ValueError(f"no verified match payload for {match_id}; existing detail retained")
+        for rid in match_maps:
+            owner = self.db.execute("SELECT match_id FROM match_maps WHERE id=?", (rid,)).fetchone()
+            if owner and owner[0] != match_id:
+                raise ValueError(f"map {rid} belongs to match {owner[0]}, not {match_id}")
+        teams_in_match = set(expected_start[2:4]) - {None} if expected_start else set()
+        stats = {rid: row for rid, row in stats.items()
+                 if relation_id(row.get("matchMap")) in match_maps
+                 and (not teams_in_match or relation_id(row.get("team")) in teams_in_match)}
         for row in teams.values(): self.upsert_team(row)
         for row in players.values():
             image, _ = image_info(row)
@@ -334,8 +382,8 @@ def export_catalog(db: sqlite3.Connection, output: Path) -> None:
     # only one half of Checkmate/Edison/Soae's career.
     def player_key(item: dict[str, Any]) -> str:
         value = str(item.get("alias") or item.get("name") or "")
-        plain = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-        return re.sub(r"[^a-z0-9]", "", plain.lower()) or f"id:{item['id']}"
+        plain = unicodedata.normalize("NFKD", value).lower()
+        return "".join(char for char in plain if char.isalnum()) or f"id:{item['id']}"
     grouped_players: dict[str, list[dict[str, Any]]] = {}
     for item in raw_players:
         grouped_players.setdefault(player_key(item), []).append(item)
@@ -373,14 +421,12 @@ def main() -> None:
         tournament_rows=[]; unique_matches={}
         if not args.skip_index:
             for variant in ("primary","secondary"):
-                result=action(TOURNAMENT_ACTION,[1,1000,None,variant],f"{BASE}/tournaments")
-                tournament_rows.extend(result.get("rows") or [])
+                tournament_rows.extend(index_rows(TOURNAMENT_ACTION,f"{BASE}/tournaments",variant))
             for row in tournament_rows:
                 if isinstance(row,dict): store.upsert_tournament(row)
             match_rows=[]
             for action_id in (RECENT_ACTION,UPCOMING_ACTION):
-                result=action(action_id,[1,2000,None],f"{BASE}/matches")
-                match_rows.extend(result.get("rows") or [])
+                match_rows.extend(index_rows(action_id,f"{BASE}/matches"))
             unique_matches={row["id"]:row for row in match_rows if isinstance(row,dict) and isinstance(row.get("id"),int)}
             for row in unique_matches.values(): store.upsert_match(row)
         store.db.commit()
@@ -393,16 +439,25 @@ def main() -> None:
         failures=[]; completed=0
         def fetch_detail(job: tuple[int,str]):
             mid,slug=job
+            slug = slug.strip()
             try: return mid,slug,request("GET",f"{BASE}/matches/{slug}").text,None
             except Exception as exc: return mid,slug,"",str(exc)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,args.workers)) as pool:
             for mid,slug,html,error in pool.map(fetch_detail,detail_jobs):
                 if error: failures.append({"id":mid,"slug":slug,"error":error})
                 else:
+                    store.db.execute("SAVEPOINT match_detail")
                     try:
                         store.ingest_detail(mid,html)
                     except Exception as exc:
+                        store.db.execute("ROLLBACK TO match_detail")
+                        # Legacy runs could mark a wrong/empty page as fetched.
+                        # Keep any real archived detail, but do not retain that
+                        # success marker when neither maps nor stats exist.
+                        store.db.execute("UPDATE matches SET detail_fetched_at=NULL,detail_sha256=NULL WHERE id=? AND NOT EXISTS(SELECT 1 FROM match_maps WHERE match_id=?) AND NOT EXISTS(SELECT 1 FROM player_map_stats WHERE match_id=?)", (mid,mid,mid))
                         failures.append({"id":mid,"slug":slug,"error":f"ingest: {exc}"})
+                    finally:
+                        store.db.execute("RELEASE match_detail")
                 completed+=1
                 if completed%25==0 or completed==len(detail_jobs): store.db.commit(); print(f"details {completed}/{len(detail_jobs)} failures={len(failures)}",flush=True)
         if args.download_media:

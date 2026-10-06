@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Activity, ArrowLeft, ExternalLink, GitCompareArrows, MapPinned, Play, Radio, Trophy, UsersRound } from "lucide-react";
 import { bundledHeroRoster } from "./heroRosterData";
-import type { EsportsMatch, OwtvMatchDetailPayload, OwtvPlayerMapStat } from "./matchTypes";
+import type { EsportsMatch, OwtvMatchDetailPayload } from "./matchTypes";
+import { aggregateStats, compareMetricValues, compareReportedMetricDesc, formatMetric, metricValue, type TotalRow, type StatMetric } from "./matchStatMath";
 
 interface Props {
   detail: OwtvMatchDetailPayload;
@@ -9,35 +10,15 @@ interface Props {
   onClose: () => void;
 }
 
-type TotalRow = OwtvPlayerMapStat & { mapCount: number };
 type SelectedMap = number | "all";
 
 const integer = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+const tableMetrics = ["eliminations", "assists", "deaths", "finalBlows", "damage", "healing", "mitigation", "fantasy"] as const;
 
-function sum(value: number | null | undefined) {
-  return Number.isFinite(value) ? Number(value) : 0;
-}
-
-function aggregateStats(rows: OwtvPlayerMapStat[]) {
-  const totals = new Map<number, TotalRow>();
-  rows.forEach((row) => {
-    const current = totals.get(row.playerId);
-    if (!current) {
-      totals.set(row.playerId, { ...row, mapCount: 1 });
-      return;
-    }
-    current.mapCount += 1;
-    current.eliminations = sum(current.eliminations) + sum(row.eliminations);
-    current.assists = sum(current.assists) + sum(row.assists);
-    current.deaths = sum(current.deaths) + sum(row.deaths);
-    current.damage = sum(current.damage) + sum(row.damage);
-    current.healing = sum(current.healing) + sum(row.healing);
-    current.mitigation = sum(current.mitigation) + sum(row.mitigation);
-    current.fantasy = sum(current.fantasy) + sum(row.fantasy);
-    current.finalBlows = sum(current.finalBlows) + sum(row.finalBlows);
-  });
-  return Array.from(totals.values());
+function metricTitle(player: TotalRow, metric: StatMetric) {
+  const state = metricValue(player, metric);
+  return state.value === null ? "未提供" : state.complete ? undefined : `${state.reportedMaps}/${state.totalMaps} 张出场地图有此项数据`;
 }
 
 function heroKey(value: string) {
@@ -114,11 +95,6 @@ const compareMetrics: Array<{
   { key: "fantasy", label: "Fantasy", decimal: true },
 ];
 
-function compareValue(player: TotalRow | undefined, key: (typeof compareMetrics)[number]["key"]) {
-  if (!player) return 0;
-  return key === "mapCount" ? player.mapCount : sum(player[key]);
-}
-
 function PlayerComparison({
   players,
   leftId,
@@ -171,18 +147,15 @@ function PlayerComparison({
     </div>
     {left && right ? <div className="owtv-compare-metrics">
       {compareMetrics.map((metric) => {
-        const leftValue = compareValue(left, metric.key);
-        const rightValue = compareValue(right, metric.key);
-        const maximum = Math.max(leftValue, rightValue, 1);
-        const leftWins = metric.lowerIsBetter ? leftValue < rightValue : leftValue > rightValue;
-        const rightWins = metric.lowerIsBetter ? rightValue < leftValue : rightValue > leftValue;
+        const result = compareMetricValues(left, right, metric.key, metric.lowerIsBetter);
+        const maximum = Math.max(result.left.value ?? 0, result.right.value ?? 0, 1);
         const format = metric.decimal ? decimal : integer;
         return <div className="owtv-compare-row" key={metric.key}>
-          <b className={leftWins ? "winner" : ""}>{format.format(leftValue)}</b>
-          <span className="left"><i style={{ width: `${Math.max(3, leftValue / maximum * 100)}%` }} /></span>
+          <b className={result.leftWins ? "winner" : ""}>{formatMetric(left, metric.key, format)}</b>
+          <span className="left"><i style={{ width: result.comparable ? `${Math.max(0, result.left.value! / maximum * 100)}%` : "0%" }} /></span>
           <strong>{metric.label}</strong>
-          <span className="right"><i style={{ width: `${Math.max(3, rightValue / maximum * 100)}%` }} /></span>
-          <b className={rightWins ? "winner" : ""}>{format.format(rightValue)}</b>
+          <span className="right"><i style={{ width: result.comparable ? `${Math.max(0, result.right.value! / maximum * 100)}%` : "0%" }} /></span>
+          <b className={result.rightWins ? "winner" : ""}>{formatMetric(right, metric.key, format)}</b>
         </div>;
       })}
     </div> : <p className="owtv-detail-empty">当前数据范围内不足两名选手，无法进行对比。</p>}
@@ -229,7 +202,7 @@ export default function OwtvMatchDetail({ detail, scheduleMatch, onClose }: Prop
   const visibleStats = useMemo(() => selectedMap === "all" ? allTotals : aggregateStats(mapRows), [allTotals, mapRows, selectedMap]);
   const orderedStats = useMemo(() => [...visibleStats].sort((a, b) => {
     const teamOrder = Number(a.teamId !== detail.match.team1.id) - Number(b.teamId !== detail.match.team1.id);
-    return teamOrder || roleOrder(a.role) - roleOrder(b.role) || sum(b.fantasy) - sum(a.fantasy);
+    return teamOrder || roleOrder(a.role) - roleOrder(b.role) || compareReportedMetricDesc(a, b, "fantasy");
   }), [detail.match.team1.id, visibleStats]);
 
   const firstRecordedMapId = useMemo(() => {
@@ -255,7 +228,10 @@ export default function OwtvMatchDetail({ detail, scheduleMatch, onClose }: Prop
   const team2Subs = sortLineup(allTotals.filter((row) => row.teamId === detail.match.team2.id && !team2ActiveIds.has(row.playerId)));
   const selectedMapRecord = selectedMap === "all" ? null : detail.maps.find((map) => map.id === selectedMap) ?? null;
   const hasMapData = selectedMap === "all" || mapRows.length > 0;
-  const mvp = [...allTotals].sort((a, b) => sum(b.fantasy) - sum(a.fantasy) || sum(b.eliminations) - sum(a.eliminations))[0];
+  const mvp = allTotals.every((row) => metricValue(row, "fantasy").complete)
+    ? [...allTotals].sort((a, b) => compareReportedMetricDesc(a, b, "fantasy") || compareReportedMetricDesc(a, b, "eliminations"))[0]
+    : undefined;
+  const hasIncompleteStats = visibleStats.some((row) => tableMetrics.some((metric) => !metricValue(row, metric).complete));
   const start = detail.match.startDate ? new Date(detail.match.startDate) : null;
   const links = [
     scheduleMatch.bilibili && { label: "B站", url: scheduleMatch.bilibili, icon: <Play size={15} /> },
@@ -311,19 +287,20 @@ export default function OwtvMatchDetail({ detail, scheduleMatch, onClose }: Prop
       <article>
         <Trophy size={22} />
         <small>数据最高（非投票 MVP）</small>
-        <strong>{mvp?.name ?? "暂无"}</strong>
-        {mvp && <p>{decimal.format(sum(mvp.fantasy))} Fantasy · {integer.format(sum(mvp.eliminations))} 击杀</p>}
+        <strong>{mvp?.name ?? "暂无完整评分"}</strong>
+        {mvp && <p>{formatMetric(mvp, "fantasy", decimal)} Fantasy · {formatMetric(mvp, "eliminations", integer)} 击杀</p>}
       </article>
       <TeamLineup teamName={detail.match.team2.name} active={team2Active} substitutes={team2Subs} selectedMap={selectedMap} mapName={selectedMapRecord?.name ?? ""} hasMapData={hasMapData} />
     </section>
 
     <section className="owtv-stat-board">
       <header><h3><UsersRound size={19} />选手数据</h3><nav><button className={selectedMap === "all" ? "active" : ""} onClick={() => setSelectedMap("all")}>全场</button>{detail.maps.map((map) => <button key={map.id} className={selectedMap === map.id ? "active" : ""} onClick={() => setSelectedMap(map.id)}>{map.name}</button>)}</nav></header>
+      {hasIncompleteStats && <p>— 未提供 · * 仅含部分出场地图的数据</p>}
       <div className="owtv-stat-table">
         <div className="head"><span>选手</span><span>位置</span><span>地图</span><span>击杀</span><span>助攻</span><span>死亡</span><span>最终击杀</span><span>伤害</span><span>治疗</span><span>减伤</span><span>Fantasy</span></div>
         {orderedStats.map((player) => <div className={player.teamId === detail.match.team1.id ? "team-one" : "team-two"} key={player.playerId}>
           <span className="player">{player.image ? <img src={player.image} alt="" /> : <i /> }<b>{player.name}</b><small>{player.teamId === detail.match.team1.id ? detail.match.team1.name : detail.match.team2.name}</small></span>
-          <span>{roleName(player.role)}</span><span>{player.mapCount}</span><span>{integer.format(sum(player.eliminations))}</span><span>{integer.format(sum(player.assists))}</span><span>{integer.format(sum(player.deaths))}</span><span>{integer.format(sum(player.finalBlows))}</span><span>{integer.format(sum(player.damage))}</span><span>{integer.format(sum(player.healing))}</span><span>{integer.format(sum(player.mitigation))}</span><span className="fantasy">{decimal.format(sum(player.fantasy))}</span>
+          <span>{roleName(player.role)}</span><span>{player.mapCount}</span>{tableMetrics.map((metric) => <span key={metric} className={metric === "fantasy" ? "fantasy" : undefined} title={metricTitle(player, metric)}>{formatMetric(player, metric, metric === "fantasy" ? decimal : integer)}</span>)}
         </div>)}
         {!orderedStats.length && <p className="owtv-detail-empty">OWTV 尚未提供这张地图的选手数据。</p>}
       </div>

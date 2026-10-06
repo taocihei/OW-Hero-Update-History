@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def identity(value: str) -> str:
-    plain = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]", "", plain.lower())
+    plain = unicodedata.normalize("NFKD", value).lower()
+    return "".join(char for char in plain if char.isalnum())
 
 
 def main() -> None:

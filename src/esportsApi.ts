@@ -1,67 +1,13 @@
 import snapshot from "./esportsSnapshot.json";
 import supplement from "./esportsSupplementSnapshot.json";
 import type { EsportsMatch, EsportsSchedulePayload, OwtvMatchDetailPayload } from "./matchTypes";
+import { mergeMatchRecords } from "./matchMerge";
 
-const CACHE_KEY = "ow-hero-history:esports-schedule";
+const CACHE_KEY = "ow-hero-history:esports-schedule:v2";
 const supplementalMatches = supplement.matches as EsportsMatch[];
 
-function matchKeys(match: EsportsMatch) {
-  const aliases: Record<string, string> = { wbg: "weibogaming", wei: "weibogaming", jd: "jdgaming" };
-  const team = (value: string) => {
-    const key = value.normalize("NFKC").replace(/[^a-z0-9]/gi, "").toLowerCase();
-    return aliases[key] ?? key;
-  };
-  const keys = [
-    `id:${match.id}`,
-    `fixture:${match.datetime.slice(0, 10)}|${[team(match.team1), team(match.team2)].sort().join("|")}`,
-    `time:${match.datetime}|${match.region}`,
-  ];
-  if (match.owtvMatchId) keys.unshift(`owtv:${match.owtvMatchId}`);
-  return keys;
-}
-
 function combineMatches(primary: EsportsMatch[]) {
-  const merged: EsportsMatch[] = [];
-  const aliases = new Map<string, number>();
-  const register = (match: EsportsMatch, index: number) => matchKeys(match).forEach((key) => aliases.set(key, index));
-  for (const match of supplementalMatches) {
-    const index = merged.push(match) - 1;
-    register(match, index);
-  }
-  for (const official of primary) {
-    const index = matchKeys(official).map((key) => aliases.get(key)).find((value) => value !== undefined);
-    if (index === undefined) {
-      const newIndex = merged.push(official) - 1;
-      register(official, newIndex);
-      continue;
-    }
-    const extra = merged[index];
-    merged[index] = {
-      ...official,
-      event: extra.event || official.event,
-      region: extra.region || official.region,
-      phase: extra.phase || official.phase,
-      stage: extra.stage || official.stage,
-      team1Logo: official.team1Logo || extra.team1Logo,
-      team2Logo: official.team2Logo || extra.team2Logo,
-      score1: official.score1 ?? extra.score1,
-      score2: official.score2 ?? extra.score2,
-      owtv: extra.owtv,
-      bilibili: extra.bilibili,
-      tournamentId: extra.tournamentId,
-      owtvMatchId: extra.owtvMatchId ?? official.owtvMatchId,
-      bracketSide: extra.bracketSide || official.bracketSide,
-      bracketGroup: extra.bracketGroup || official.bracketGroup,
-      bracketMatchNumber: extra.bracketMatchNumber ?? official.bracketMatchNumber,
-      round: extra.round ?? official.round,
-      nextMatchWinnerId: extra.nextMatchWinnerId ?? official.nextMatchWinnerId,
-      nextMatchLoserId: extra.nextMatchLoserId ?? official.nextMatchLoserId,
-      sources: Array.from(new Set([...(official.sources ?? ["OW Esports"]), ...(extra.sources ?? ["OWTV"])])),
-    };
-    register(merged[index], index);
-    register(official, index);
-  }
-  return merged;
+  return mergeMatchRecords([...supplementalMatches, ...primary]);
 }
 
 export function mergeEsportsMatches(matches: EsportsMatch[]) {

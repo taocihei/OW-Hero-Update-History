@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime
+import json
+import os
+import re
+import tempfile
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_URL = "http://127.0.0.1:4181"
+BASE_URL = os.environ.get("UI_BASE_URL", "http://127.0.0.1:4181")
 
 
 def step(name: str) -> None:
@@ -112,7 +116,11 @@ def test_schedule(page: Page) -> None:
 
     page.locator(".owtv-status-tabs button").filter(has_text="即将开始").click()
     upcoming_dates = match_card_timestamps(page)
-    assert upcoming_dates and upcoming_dates == sorted(upcoming_dates)
+    upcoming_count = int(page.locator(".owtv-result-count").inner_text().splitlines()[0])
+    assert len(upcoming_dates) == min(upcoming_count, 24)
+    assert upcoming_dates == sorted(upcoming_dates)
+    if upcoming_count == 0:
+        assert page.locator(".pro-empty").is_visible()
     assert page.locator(".owtv-status-tabs button").filter(has_text="即将开始").get_attribute("aria-pressed") == "true"
 
     page.locator(".owtv-status-tabs button").filter(has_text="比赛结果").click()
@@ -147,6 +155,36 @@ def choose_sidebar_item(page: Page, query: str, expected: str) -> None:
     item.click()
 
 
+def test_analytics_header_layout(page: Page) -> None:
+    original_viewport = page.viewport_size
+    for width in (1500, 1024):
+        page.set_viewport_size({"width": width, "height": 930})
+        page.locator(".draft-room-head").scroll_into_view_if_needed()
+        page.locator(".draft-room-head").evaluate("header => window.scrollTo({ top: window.scrollY + header.getBoundingClientRect().top - 100, behavior: 'instant' })")
+        measurements = page.locator(".draft-room-head").evaluate("""header => {
+            const title = header.querySelector('h2');
+            const strip = header.querySelector('.draft-source-strip');
+            const controls = [...header.querySelectorAll('label, .draft-source-strip')];
+            return {
+                titleHeight: title.getBoundingClientRect().height,
+                titleFont: parseFloat(getComputedStyle(title).fontSize),
+                stripWidth: strip.clientWidth, stripScroll: strip.scrollWidth,
+                minFont: Math.min(...[...header.querySelectorAll('h2, label, select, span, b, a')].map(node => parseFloat(getComputedStyle(node).fontSize))),
+                outside: controls.some(node => node.getBoundingClientRect().right > innerWidth),
+                pageWidth: document.documentElement.clientWidth,
+                pageScroll: document.documentElement.scrollWidth,
+            };
+        }""")
+        assert measurements["titleHeight"] < measurements["titleFont"] * 1.6, measurements
+        assert measurements["stripScroll"] <= measurements["stripWidth"] + 1, measurements
+        assert measurements["minFont"] >= 12, measurements
+        assert not measurements["outside"], measurements
+        assert measurements["pageScroll"] <= measurements["pageWidth"] + 1, measurements
+        page.screenshot(path=str(Path(tempfile.gettempdir()) / f"ow-analytics-header-{width}.png"))
+    page.set_viewport_size(original_viewport)
+    step("1500/1024 统计页标题单行、来源统计完整换行与字号")
+
+
 def test_analytics(page: Page) -> None:
     page.locator(".match-subnav button").filter(has_text="战队").click()
     assert page.get_by_role("heading", name="战队战术档案", exact=True).is_visible()
@@ -167,9 +205,10 @@ def test_analytics(page: Page) -> None:
     roster_player.click()
     assert page.get_by_role("heading", name="选手英雄池", exact=True).is_visible()
     assert page.locator(".five-player").is_visible()
+    test_analytics_header_layout(page)
     page.locator(".five-player-tabs button").filter(has_text="数据").click()
     assert page.locator(".five-data-tab").is_visible()
-    page.locator(".five-player-tabs button").filter(has_text="赛程").click()
+    page.locator(".five-player-tabs button").filter(has_text="比赛").click()
     assert page.locator(".five-schedule-tab").is_visible()
     page.locator(".five-player-tabs button").filter(has_text="基础信息").click()
     step("战队到选手下钻及选手页签")
@@ -177,18 +216,49 @@ def test_analytics(page: Page) -> None:
     page.locator(".match-subnav button").filter(has_text="选手").click()
     choose_sidebar_item(page, "Guxue", "Guxue")
     assert page.locator(".five-player-id h3").inner_text().lower() == "guxue"
-    page.locator(".five-event-select select").select_option("all")
+    # Web preview cannot call Tauri's SQLite bridge. It must not silently substitute
+    # an unrelated archive for OWTV; select a known historical source explicitly.
+    source_select = page.get_by_role("combobox", name="选手统计来源", exact=True)
+    event_select = page.get_by_role("combobox", name="选手赛事筛选", exact=True)
+    assert source_select.input_value() == "owtv"
+    assert "请在桌面软件中查看本地 OWTV 数据库" in page.locator(".five-player").inner_text()
+    assert page.locator(".five-metric-grid article").first.locator("b").inner_text() == "0"
+    source_select.select_option("statslab")
+    event_select.select_option("all")
+    archive = json.loads((ROOT / "src" / "esportsHistorySnapshot.json").read_text(encoding="utf-8"))
+    player_matches = [row for row in archive["playerPerformance"] if row["player"].lower() == "guxue"]
+    assert len(player_matches) > 1
+    expected_maps = sum(row["mapCount"] for row in player_matches)
+    assert int(page.locator(".five-metric-grid article").first.locator("b").inner_text()) == len(player_matches)
+    assert page.locator(".five-metric-grid article").first.locator("small").inner_text() == f"{expected_maps} 图记录"
     history_rows = page.locator(".five-history article")
-    assert history_rows.count() > 1
+    expected_events = {row["event"] for row in player_matches}
+    assert history_rows.count() == len(expected_events) > 1
     page.locator(".five-history-sort button").filter(has_text="按时间").click()
-    latest = [iso_timestamp(value) for value in history_rows.evaluate_all("rows => rows.map(row => row.dataset.latest).filter(Boolean)")]
+    def history_dates() -> list[datetime]:
+        values = history_rows.locator(".five-history-name small").all_text_contents()
+        assert len(values) == len(expected_events) and all(value != "—" for value in values)
+        return [datetime.strptime(value, "%Y/%m/%d") for value in values]
+    latest = history_dates()
     assert latest == sorted(latest, reverse=True)
     assert page.locator(".five-history-sort button").filter(has_text="按时间").get_attribute("aria-pressed") == "true"
     page.locator(".five-history-sort button").filter(has_text="按名次").click()
-    ranks = [int(value) if value != "unranked" else 10**9 for value in history_rows.evaluate_all("rows => rows.map(row => row.dataset.rank)")]
-    assert ranks == sorted(ranks)
+    ranks = [int(found.group()) if (found := re.search(r"\d+", value)) else 10**9 for value in history_rows.locator(":scope > b").all_text_contents()]
+    assert len(ranks) == len(expected_events) and ranks == sorted(ranks)
+    assert all(rank == 10**9 for rank in ranks), "Stats Lab 没有最终名次，不应推算"
+    assert history_dates() == sorted(latest, reverse=True), "缺失名次时按时间保持稳定顺序"
     assert page.locator(".five-history-sort button").filter(has_text="按名次").get_attribute("aria-pressed") == "true"
-    step("比赛时间、赛事名次与同分规则排序")
+    event = event_select.locator("option").nth(1).get_attribute("value")
+    event_select.select_option(event)
+    expected_event_count = sum(row["event"] == event for row in player_matches)
+    assert 0 < expected_event_count < len(player_matches)
+    assert int(page.locator(".five-metric-grid article").first.locator("b").inner_text()) == expected_event_count
+    assert page.locator(".five-event-focus h4").inner_text() == event
+    page.locator(".five-player-tabs button").filter(has_text="比赛").click()
+    assert page.locator(".five-schedule-tab .five-event-match-rows > article").count() == expected_event_count
+    page.locator(".five-player-tabs button").filter(has_text="基础信息").click()
+    event_select.select_option("all")
+    step("本地来源边界、历史统计、赛事筛选与时间/名次排序")
     hero_buttons = page.locator(".five-event-heroes button") if page.locator(".five-event-heroes button").count() else page.locator(".five-hero-pool button")
     assert hero_buttons.count() > 0
     hero_buttons.first.click()
@@ -232,7 +302,7 @@ def main() -> None:
             test_analytics(page)
             test_mobile(browser)
         except (AssertionError, PlaywrightTimeoutError):
-            page.screenshot(path=str(ROOT / "tests" / "ui-usage-failure.png"), full_page=True)
+            page.screenshot(path=str(Path(tempfile.gettempdir()) / "ow-ui-usage-failure.png"), full_page=True)
             raise
         assert not console_errors, f"Console errors: {console_errors}"
         assert not page_errors, f"Page errors: {page_errors}"

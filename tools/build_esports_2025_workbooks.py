@@ -265,7 +265,9 @@ def main() -> None:
         first = group[0]
         won = sum(number(row.get("Result", "0")) for row in group)
         player_performance.append({
-            "id": f"2025:{match_id}:{player}", "datetime": "2025-01-01T00:00:00Z",
+            # The FACEIT export has a season but no match date. Do not invent
+            # January 1: it changes chronology and looks like verified data.
+            "id": f"2025:{match_id}:{player}", "datetime": "", "dateKnown": False,
             "event": f"2025 OWCS Stage 1 · {first.get('region', '')}", "player": player,
             "team1": first["team_name"], "team2": first["opposing_team_name"], "team1Logo": "", "team2Logo": "",
             "score1": int(won), "score2": max(0, len(group) - int(won)), "url": SOURCE_URLS[-1], "mapCount": len(group),

@@ -237,8 +237,8 @@ export default function MatchCenter({ onOpenBalance, locale }: MatchCenterProps)
     setSyncError("");
     try {
       const payload = await syncEsportsSchedule();
-      setMatches(payload.matches);
-      setSource(payload.source);
+      setMatches((current) => mergeEsportsMatches([...current, ...payload.matches]));
+      setSource((current) => current.includes("本地历史") ? `${payload.source} + OWTV 本地历史` : payload.source);
       setSyncedAt(payload.syncedAt);
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));

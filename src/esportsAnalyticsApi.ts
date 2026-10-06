@@ -6,7 +6,7 @@ export interface OverallHeroUsage { hero_name: string; role: string; usage_count
 export interface TeamHeroUsage { team_name: string; hero_name: string; role: string; usage_count: string; pick_count: string; pick_rate: string; damage_verified?: boolean; metric?: string }
 export interface PlayerHeroUsage { player_name: string; team_name: string; hero_name: string; usage_count: string; appearance_count?: string; play_time_seconds?: string; damage_dealt?: string; damage_verified?: boolean; metric?: string }
 export interface TournamentHeroUsage { tournament_sheet: string; hero_name: string; role: string; usage_count: string; pick_count: string; pick_rate: string; damage_verified?: boolean; metric?: string }
-export interface MapHeroUsage { map_name: string; hero_name: string; role: string; usage_count: string; pick_count: string; pick_rate: string; damage_verified?: boolean; metric?: string }
+export interface MapHeroUsage { map_name: string; hero_name: string; role: string; usage_count: string; pick_count: string; pick_rate: string; damage_verified?: boolean; metric?: string; tournament_sheet?: string }
 export interface HeroWinRate { player_name?: string; team_name?: string; hero_name: string; matches_played: string; wins: string; losses: string; win_rate: string }
 export interface MatchHeroUsage { tournament_sheet: string; match_id: string; match_title: string; team_top: string; team_bottom: string; team_name?: string; hero_name: string; usage_count: string; damage_verified?: boolean; metric?: string; evidence_maps?: string[]; evidence_players?: string[] }
 export interface TournamentTeamHeroUsage extends TeamHeroUsage { tournament_sheet: string }
@@ -177,7 +177,7 @@ function withCareerArchive(payload: EsportsAnalyticsPayload): EsportsAnalyticsPa
     teamHeroUsage: mergeUsageRows([...payload.teamHeroUsage, ...archive.teamHeroUsage, ...archive2025.teamHeroUsage], ["team_name", "hero_name", "damage_verified"]),
     playerHeroUsage: mergeUsageRows([...payload.playerHeroUsage, ...archive.playerHeroUsage, ...archive2025.playerHeroUsage], ["player_name", "team_name", "hero_name", "damage_verified"]),
     tournamentHeroUsage: mergeUsageRows([...payload.tournamentHeroUsage, ...archive.tournamentHeroUsage, ...archive2025.tournamentHeroUsage], ["tournament_sheet", "hero_name", "damage_verified"]),
-    mapHeroUsage: mergeUsageRows([...payload.mapHeroUsage, ...archive.mapHeroUsage, ...archive2025.mapHeroUsage], ["map_name", "hero_name", "damage_verified"]),
+    mapHeroUsage: mergeUsageRows<MapHeroUsage>([...payload.mapHeroUsage, ...archive.mapHeroUsage, ...archive2025.mapHeroUsage], ["tournament_sheet", "map_name", "hero_name", "damage_verified"]),
     matchHeroUsage: mergeUsageRows([...payload.matchHeroUsage, ...archive2025.matchHeroUsage], ["tournament_sheet", "match_id", "team_name", "hero_name"]),
     tournamentTeamHeroUsage: mergeUsageRows([...payload.tournamentTeamHeroUsage, ...archive.tournamentTeamHeroUsage, ...archive2025.tournamentTeamHeroUsage], ["tournament_sheet", "team_name", "hero_name", "damage_verified"]),
     tournamentPlayerHeroUsage: mergeUsageRows([...payload.tournamentPlayerHeroUsage, ...archive.tournamentPlayerHeroUsage, ...archive2025.tournamentPlayerHeroUsage], ["tournament_sheet", "player_name", "team_name", "hero_name", "damage_verified"]),

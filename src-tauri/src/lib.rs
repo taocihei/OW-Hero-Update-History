@@ -7,6 +7,8 @@ use std::time::Duration;
 use tauri::Manager;
 
 mod history;
+mod player_performance;
+mod snapshot_install;
 
 fn first_text(value: Option<&Value>, fallback: &str) -> String {
     match value {
@@ -106,10 +108,7 @@ fn fetch_owtv_match_index(app: tauri::AppHandle) -> Result<Value, String> {
 
     Ok(json!({
         "source": "OWTV 本地历史数据库",
-        "syncedAt": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
+        "syncedAt": player_performance::updated_at(&connection).map_err(|error| format!("读取同步日期失败：{error}"))?,
         "matches": matches
     }))
 }
@@ -187,7 +186,7 @@ fn fetch_owtv_match_detail(
 
     let mut stat_statement = connection.prepare(r#"
         SELECT pms.match_map_id, pms.team_id, pms.player_id, COALESCE(NULLIF(TRIM(p.alias), ''), NULLIF(TRIM(p.name), ''), 'Unknown'),
-               COALESCE(p.role, pms.role, ''), COALESCE(p.image_url, ''),
+               COALESCE(pms.role, p.role, ''), COALESCE(p.image_url, ''),
                pms.eliminations, pms.assists, pms.deaths, pms.damage_dealt,
                pms.healing_done, pms.damage_mitigated, pms.fantasy_score,
                pms.objective_time, pms.final_blows
@@ -455,265 +454,19 @@ async fn fetch_owtv_tournament(
     Ok(extract_owtv_matches(&html, tournament_id, event, region))
 }
 
-fn extract_owtv_player_match(
-    html: &str,
-    player_name: &str,
-    metadata: &Value,
-) -> Option<(Value, Value)> {
-    let roots = extract_next_f_values(html);
-    let wanted = player_name.trim().to_lowercase();
-    let mut seen = HashSet::new();
-    let mut maps = Vec::new();
-    let mut profile = Value::Null;
-    for root in &roots {
-        visit_json(root, &mut |value| {
-            let Some(object) = value.as_object() else {
-                return;
-            };
-            if ![
-                "eliminations",
-                "assists",
-                "deaths",
-                "damageDealt",
-                "healingDone",
-                "damageMitigated",
-            ]
-            .iter()
-            .all(|key| object.contains_key(*key))
-            {
-                return;
-            }
-            let Some(person) = object.get("person").and_then(Value::as_object) else {
-                return;
-            };
-            let alias = person
-                .get("alias")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if alias.trim().to_lowercase() != wanted {
-                return;
-            }
-            let stat_id = object
-                .get("id")
-                .map(Value::to_string)
-                .unwrap_or_else(|| format!("{}:{}", alias, maps.len()));
-            if seen.insert(stat_id) {
-                maps.push(value.clone());
-                if profile.is_null() {
-                    profile = Value::Object(person.clone());
-                }
-            }
-        });
-    }
-    if maps.is_empty() {
-        return None;
-    }
-    let sum = |key: &str| {
-        maps.iter()
-            .filter_map(|row| row.get(key).and_then(Value::as_f64))
-            .sum::<f64>()
-    };
-    Some((
-        json!({
-            "id": metadata.get("id").cloned().unwrap_or(Value::Null),
-            "datetime": metadata.get("datetime").cloned().unwrap_or(Value::Null),
-            "event": metadata.get("event").cloned().unwrap_or(Value::Null),
-            "team1": metadata.get("team1").cloned().unwrap_or(Value::Null),
-            "team2": metadata.get("team2").cloned().unwrap_or(Value::Null),
-            "team1Logo": metadata.get("team1Logo").cloned().unwrap_or(Value::Null),
-            "team2Logo": metadata.get("team2Logo").cloned().unwrap_or(Value::Null),
-            "score1": metadata.get("score1").cloned().unwrap_or(Value::Null),
-            "score2": metadata.get("score2").cloned().unwrap_or(Value::Null),
-            "url": metadata.get("url").cloned().unwrap_or(Value::Null),
-            "mapCount": maps.len(),
-            "eliminations": sum("eliminations"),
-            "assists": sum("assists"),
-            "deaths": sum("deaths"),
-            "damage": sum("damageDealt"),
-            "healing": sum("healingDone"),
-            "mitigation": sum("damageMitigated"),
-            "fantasyScore": sum("cachedFantasyScore"),
-        }),
-        profile,
-    ))
-}
-
 #[tauri::command]
-async fn fetch_owtv_player_performance(
+fn fetch_owtv_player_performance(
     app: tauri::AppHandle,
     player_name: String,
-    matches: Vec<Value>,
 ) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(8))
-        .timeout(Duration::from_secs(22))
-        .user_agent("OWHeroUpdateHistory/0.10.0")
-        .build()
-        .map_err(|error| format!("Failed to initialize player statistics client: {error}"))?;
-
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Failed to locate esports archive: {error}"))?;
-    fs::create_dir_all(&data_dir)
-        .map_err(|error| format!("Failed to create esports archive folder: {error}"))?;
-    let archive_path = data_dir.join("esports-live-history.json");
-    let mut archive: Value = fs::read_to_string(&archive_path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_else(|| json!({ "schemaVersion": 1, "updatedAt": 0, "players": {} }));
-    if archive.get("players").and_then(Value::as_object).is_none() {
-        archive["players"] = json!({});
-    }
-    let player_key: String = player_name
-        .to_lowercase()
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .collect();
-    let player_archive = archive["players"]
-        .as_object_mut()
-        .unwrap()
-        .entry(player_key.clone())
-        .or_insert_with(|| json!({ "displayName": player_name, "profile": null, "matches": {} }));
-    if player_archive
-        .get("matches")
-        .and_then(Value::as_object)
-        .is_none()
-    {
-        player_archive["matches"] = json!({});
-    }
-    let cached_ids: HashSet<String> = player_archive["matches"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect();
-
-    let jobs = matches
-        .into_iter()
-        .filter(|metadata| {
-            let id = metadata
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            !cached_ids.contains(id)
-        })
-        .filter_map(|metadata| {
-            let url = metadata.get("url").and_then(Value::as_str)?.to_string();
-            if !url.starts_with("https://owtv.gg/matches/") {
-                return None;
-            }
-            let client = client.clone();
-            let player_name = player_name.clone();
-            Some(async move {
-                let response = client.get(&url).send().await.ok()?;
-                if !response.status().is_success() {
-                    return None;
-                }
-                let html = response.text().await.ok()?;
-                extract_owtv_player_match(&html, &player_name, &metadata)
-            })
-        });
-    let results = futures::future::join_all(jobs).await;
-    let mut fresh_rows = Vec::new();
-    let mut profile = Value::Null;
-    for result in results.into_iter().flatten() {
-        fresh_rows.push(result.0);
-        if profile.is_null() {
-            profile = result.1;
-        }
-    }
-    let fetched_match_count = fresh_rows.len();
-    let received_profile = !profile.is_null();
-    let player_archive = archive["players"]
-        .as_object_mut()
-        .unwrap()
-        .get_mut(&player_key)
-        .unwrap();
-    let cached_match_count = player_archive["matches"]
-        .as_object()
-        .map(|rows| rows.len())
-        .unwrap_or_default();
-    for row in fresh_rows {
-        let id = row
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        if !id.is_empty() {
-            player_archive["matches"]
-                .as_object_mut()
-                .unwrap()
-                .insert(id, row);
-        }
-    }
-    if !profile.is_null() {
-        player_archive["profile"] = profile.clone();
-    } else {
-        profile = player_archive
-            .get("profile")
-            .cloned()
-            .unwrap_or(Value::Null);
-    }
-    if fetched_match_count > 0 || received_profile {
-        archive["updatedAt"] = json!(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or_default());
-        let serialized = serde_json::to_string_pretty(&archive)
-            .map_err(|error| format!("Failed to serialize esports archive: {error}"))?;
-        let temporary_path = archive_path.with_extension("json.tmp");
-        fs::write(&temporary_path, serialized)
-            .map_err(|error| format!("Failed to write esports archive: {error}"))?;
-        if archive_path.exists() {
-            fs::remove_file(&archive_path)
-                .map_err(|error| format!("Failed to replace esports archive: {error}"))?;
-        }
-        fs::rename(&temporary_path, &archive_path)
-            .map_err(|error| format!("Failed to finalize esports archive: {error}"))?;
-    }
-
-    let mut rows: Vec<Value> = archive["players"]
-        .get(&player_key)
-        .and_then(|value| value.get("matches"))
-        .and_then(Value::as_object)
-        .map(|values| values.values().cloned().collect())
-        .unwrap_or_default();
-    rows.sort_by(|a, b| {
-        b.get("datetime")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .cmp(
-                a.get("datetime")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-            )
-    });
-    let total = |key: &str| {
-        rows.iter()
-            .filter_map(|row| row.get(key).and_then(Value::as_f64))
-            .sum::<f64>()
-    };
-    Ok(json!({
-        "source": "OWTV 本地增量缓存",
-        "player": player_name,
-        "profile": profile,
-        "archivePath": archive_path.to_string_lossy(),
-        "cachedMatchCount": cached_match_count,
-        "fetchedMatchCount": fetched_match_count,
-        "matchCount": rows.len(),
-        "mapCount": total("mapCount"),
-        "totals": {
-            "eliminations": total("eliminations"),
-            "assists": total("assists"),
-            "deaths": total("deaths"),
-            "damage": total("damage"),
-            "healing": total("healing"),
-            "mitigation": total("mitigation"),
-            "fantasyScore": total("fantasyScore"),
-        },
-        "matches": rows,
-    }))
+    let database = app.path().app_data_dir()
+        .map_err(|error| format!("无法定位比赛数据库：{error}"))?.join("owtv.sqlite3");
+    let connection = Connection::open_with_flags(&database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("无法读取比赛数据库：{error}"))?;
+    let mut result = player_performance::read(&connection, &player_name)
+        .map_err(|error| format!("读取选手比赛失败：{error}"))?;
+    result["archivePath"] = json!(database.to_string_lossy());
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1031,10 +784,7 @@ pub fn run() {
             )?;
             let owtv_database = data_dir.join("owtv.sqlite3");
             let bundled_owtv_database = include_bytes!("../../data/owtv/owtv.sqlite3");
-            let installed_size = fs::metadata(&owtv_database).map(|item| item.len()).unwrap_or(0);
-            if installed_size < bundled_owtv_database.len() as u64 {
-                fs::write(&owtv_database, bundled_owtv_database)?;
-            }
+            snapshot_install::install_owtv_snapshot(&owtv_database, bundled_owtv_database)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

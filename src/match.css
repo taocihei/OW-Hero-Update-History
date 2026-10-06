@@ -841,3 +841,16 @@ button.scout-rank:hover { background: #e7f4f2; box-shadow: inset 3px 0 #0ba1ae; 
   .asia-query > div { flex-direction: column; gap: 8px; }
   .asia-query button { min-height: 44px; }
 }
+.usage-source-selector { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.usage-source-selector select { min-height: 40px; padding: 6px 12px; color: #17313a; background: #fff; border: 1px solid #aebfc3; font: inherit; }
+.usage-scope-note { margin: 10px 0; color: #546e76; font-size: 14px; line-height: 1.6; }
+.five-player-tabs { flex-wrap: wrap; overflow-x: visible; }
+.five-player-tabs > span { flex-basis: 100%; min-width: 0; margin-left: 0; white-space: normal; overflow-wrap: anywhere; }
+.five-event-select { min-width: 0; flex: 1 1 240px; }
+.five-event-select select { min-width: 0; width: 100%; font-size: 14px; }
+.draft-room-head { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px 20px; }
+.draft-room-head > div:first-child { flex: 0 0 100%; min-width: 0; }
+.draft-room-head > .usage-source-selector { flex: 0 1 340px; min-width: 0; }
+.draft-room-head > .usage-source-selector select { max-width: 100%; }
+.draft-room-head > .draft-source-strip { flex: 1 1 760px; min-width: 0; flex-wrap: wrap; overflow: visible; }
+.draft-room-head > .draft-source-strip > * { flex: 1 0 auto; justify-content: center; }
